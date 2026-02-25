@@ -1,0 +1,4 @@
+[submodule "CogletESP"]
+	path = CogletESP
+	url = git@github.com:will-cogley/CogletESP.git
+	branch = CogletESP
