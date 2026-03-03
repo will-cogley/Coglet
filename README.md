@@ -14,3 +14,4 @@ PCB (CogNog V1.0):
 - 35->14
 - 36->41
 - 37->42
+- Mouth pin is on pin 19 - the final slot - which is unintuitive
