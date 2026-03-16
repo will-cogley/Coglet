@@ -2,12 +2,7 @@
 Will Cogley's DIY Desktop Companion for Makers
 
 # Instructions
-Refer to the build video below. For further reading, refer to the translated docs for how to upload to the ESP.
-
-
-
-[<img src="https://img.youtube.com/vi/-7I-jFSNP2E/hqdefault.jpg" width="600" height="300"
-/>](https://www.youtube.com/embed/<-7I-jFSNP2E>)
+Refer to the [build video](https://www.youtube.com/watch?v=-7I-jFSNP2E). For further reading and troubleshooting, refer to the translated docs in this repo.
 
 
 # Known Issues
