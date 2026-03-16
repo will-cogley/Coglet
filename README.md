@@ -7,7 +7,7 @@ Refer to the build video below. For further reading, refer to the translated doc
 
 
 [<img src="https://img.youtube.com/vi/-7I-jFSNP2E/hqdefault.jpg" width="600" height="300"
-/>]([https://www.youtube.com/watch?v=-7I-jFSNP2E)
+/>](https://www.youtube.com/embed/<-7I-jFSNP2E>)
 
 
 # Known Issues
