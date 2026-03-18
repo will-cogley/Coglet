@@ -1,5 +1,5 @@
 # Coglet
-Will Cogley's DIY Desktop Companion for Makers
+Will Cogley's DIY Desktop Companion for Makers. Support our kickstarter to allow us to keep improving Coglet and so we can offer all components in one place! https://www.kickstarter.com/projects/willcogley/coglet-open-source-3d-printable-robot-companion-kit
 
 # Instructions
 Refer to the [build video](https://www.youtube.com/watch?v=-7I-jFSNP2E). For further reading and troubleshooting, refer to the translated docs in this repo.
