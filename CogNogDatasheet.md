@@ -111,19 +111,28 @@ The system can be powered via the programming port, but no power will be deliver
 
 *FAQ: Is it essential to use XiaoZhi AI?  The system is a helpful starting point to get up and running quickly, but for developers it is not necessary. NMRobotics is also developing a locally-running alternative dashboard.* 
 
-## 2.2 Guides
+## 2.2 Default Functionality
+
+| Item | Functionality |
+| --- | --- |
+| Programming Selector Switch | Use to switch which MCU is connected to the programming port USB - enabling you to program both MCUs with the same port |
+| Calibration Mode Switch | Via the RP2040, put all servos into a default position to assist with making sure all servos are properly calibrated when assembling |
+| Facetrack Mode Switch | Via the Grove Vision AI Board, track and follow user’s face in realtime (uses on-board local processing) |
+| Servo Test Button  | Via the RP2040, simultaneously wiggle all servos back and forth by a few degrees to check ROM and function during assembly/testing |
+
+## 2.3 Guides
 
 *This section is a stub ! Most recent tutorial overview can be found here:*
 
 https://youtu.be/-7I-jFSNP2E?si=6lqtyZIJ3J-2O9Dj
 
-### 2.2.1 Manually Uploading Code
+### 2.3.1 Manually Uploading Code
 
 1. It is recommended to follow this guide to setup ESP-IDF: https://github.com/will-cogley/Coglet/blob/main/Translated Docs for XiaoZhi AI/Setting up the ESP IDF 5.5.2 Development Environment on Windows and Compiling Xiaozhi - Feishu Docs.pdf
 2. Clone the github repository 
 3. Using ESP-IDF, build and flash 
 
-### 2.2.2 Adding a customised wakeword
+### 2.3.2 Adding a customised wakeword
 
 1. coming soon
 
@@ -133,14 +142,7 @@ https://youtu.be/-7I-jFSNP2E?si=6lqtyZIJ3J-2O9Dj
 
 | Issue | Recommended action |
 | --- | --- |
-| Images taken with camera are over/under exposed | Search in "main\boards\common\ esp32_camera. cc " for:
-{0xd3, 0xb0}
-
-Then change it to:
-{0xd3, 0x70},
-If you think the light is too dim, change "0x70" to "0x78".
-
-Re-build and flash the code via ESP-IDF |
+| "Images taken with camera are over/under exposed | Search in "main\boards\common\ esp32_camera. cc " for: {0xd3, 0xb0} Then change it to: {0xd3, 0x70}, If you think the light is too dim, change "0x70" to "0x78". Re-build and flash the code via ESP-IDF" |
 | No power to main board when using USBC > JST XH adaptor board | Use a power adaptor featuring a USBA > USBC cable |
 
 ---
