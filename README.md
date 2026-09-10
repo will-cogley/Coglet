@@ -2,29 +2,15 @@
 Will Cogley's DIY Desktop Companion for Makers. Support our kickstarter to allow us to keep improving Coglet and so we can offer all components in one place! https://www.kickstarter.com/projects/willcogley/coglet-open-source-3d-printable-robot-companion-kit
 
 # Instructions
-Refer to the [build video](https://www.youtube.com/watch?v=-7I-jFSNP2E). For further reading and troubleshooting, refer to the translated docs in this repo.
+*Core documentation for the system and PCB can be found in the [CogNog Datasheet](https://github.com/will-cogley/Coglet/blob/main/CogNogDatasheet.md)*
 
+Refer to the [build video](https://www.youtube.com/watch?v=-7I-jFSNP2E). 
 
-# Known Issues
-PCB (CogNog V1.0):
-- USB socket for RP2040 is tight - requires a slim USB-C cable
-- ESP Camera socket too close to other components
-- In general needs more bulk capacitance to manage power dips
-- Mic socket too close to ESP
-- Camera will not work with default pins and simultaneously use tasks requiring PSRAM - must rewire the following ESP pins and use camera-version branch of CogletESP
-- 35->14
-- 36->41
-- 37->42
-- Mouth pin is on pin 19 - the final slot - which is unintuitive
-- Camera feed for ESP32 Cam is horizontally flipped!
-  
-Mechanical
-- Servos are too tight generally - we are working on finding a better servo supplier
-- There are some sub-optimal snap-fits which will be converted to use screws at some point
-- On lower quality PLA the servos can lose grip by stripping away the plastic
+For further reading and troubleshooting, refer to the translated docs in this repo.
+
 
 # Parts List
-Consider backing our kickstarter so we can provide all the parts in one place!
+Consider backing our [kickstarter](https://www.kickstarter.com/projects/willcogley/coglet-open-source-3d-printable-robot-companion-kit) so we can provide all the parts in [one place!](https://nmrobots.com/)
 - CogNog PCB - See project files
 - [Grove Vision AI V2 plus camera and adaptor](https://nmrobots.com/products/grove-vision-ai-module-v2-hd-camera-adaptor-15-pin-flex-cable)
 - [Microphone](https://www.amazon.co.uk/EC-Buying-INMP441-Omnidirectional-Microphone/dp/B0C1C64R8S/ref=sr_1_24?crid=QYJZSFNCQO8X&dib=eyJ2IjoiMSJ9.lZlZ1cPnrTgMcv-W-gCN1fLz9EHti-quOgiDx0rtgG0M9T7hHUXFiX9OIZak1dpRXu---l3GiSeW8R92Z_h_xxpwWeot2r3mSNT7EdTnE8b72qqrtV5jpGvTfk94t-D-bhzV9SKtaXPmQh1oV27CHmToelQJInbJ8K1nIVu62k7QtNYLLVGJzOr-KHE9oqe8AwE7JJfAy0MUWYFivl2qMgDdEnIWL8ARlwTEV-TnNDOQzvP9WgYwM82FW8ZkRyjkoJeUmunKjfBcSE-evoIkI6TtszoGN2k4I_8tNI02TN4.wUYZ98wtWVpGQZSIVSkuclgJsP47m4mCmyZ86vnJiZk&dib_tag=se&keywords=esp+microphone&qid=1773668375&sprefix=espmicrophone%2Caps%2C317&sr=8-24)
