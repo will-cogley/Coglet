@@ -19,39 +19,26 @@ PWM_NOE_PIN = 8
 
 # GPIO6/7/8 are still taken directly from the PCB 2.0 schematic.
 
-# Only the logical SERVO-number -> PCA-channel table below follows the
-
-# assembled-head mapping that was physically tested and confirmed.
-# IMPORTANT:
-# These are the *assembled-head verified* logical SERVO numbers used by
-# animation.py, not the schematic connector-net labels.
+# Physical servo connector semantics.
 #
-# Verified on the real V2 head:
-#   SERVO1 = right ear
-#   SERVO2 = left ear
-#   SERVO3 = eyelid
-#   SERVO4 = mouth
-#   SERVO5 = right eye
-#   SERVO6 = left eye
-#   SERVO7 = neck pitch
-#   SERVO8 = neck left/right
-#   SERVO9 = body/base yaw
+# The number printed beside each PCB servo socket is the Socket ID, and the
+# Socket ID is the PCA9685 channel number.  There is intentionally no second
+# remapping table here:
 #
-# The user-verified PCA channels are:
-SERVO_PORT_TO_CHANNEL = {
-    1: 0,   # right ear
-    2: 1,   # left ear
-    3: 2,   # eyelid
-    4: 3,   # mouth
-    5: 5,   # right eye
-    6: 4,   # left eye
-    7: 8,   # neck pitch
-    8: 9,   # neck left/right
-    9: 10,  # body/base yaw
-    10: 11,
-    11: 6,
-    12: 7,
-}
+#   Socket 0  -> PCA CH0   (Right Ear / EAR)
+#   Socket 1  -> PCA CH1   (Left Ear / EAL)
+#   Socket 2  -> PCA CH2   (Eyelid / LID)
+#   Socket 3  -> PCA CH3   (Mouth / MOU)
+#   Socket 4  -> PCA CH4   (Left Eye / EYL)
+#   Socket 5  -> PCA CH5   (Right Eye / EYR)
+#   Socket 8  -> PCA CH8   (Neck Pitch / PIT)
+#   Socket 9  -> PCA CH9   (Neck Roll / ROL)
+#   Socket 10 -> PCA CH10  (Base Yaw / YAW)
+#
+# Sockets 6, 7 and 11 remain valid physical/PCA channels even though they are
+# not assigned to one of the named servos above.
+SERVO_SOCKET_MIN = 0
+SERVO_SOCKET_MAX = 11
 
 
 # PCA9685 nOE is active LOW.
@@ -216,20 +203,20 @@ class Servo:
         max_angle=180.0,
         enabled=True
     ):
-        # V1 API compatibility:
-        # on PCB2 pin_num is interpreted as a SERVO socket number (1..12).
+        # pin_num is the physical PCB Socket ID printed on the board.
+        # By hardware definition, Socket ID == PCA9685 channel.
         self.port_num = int(pin_num)
 
-        if self.port_num not in SERVO_PORT_TO_CHANNEL:
+        if not (SERVO_SOCKET_MIN <= self.port_num <= SERVO_SOCKET_MAX):
             raise ValueError(
-                "Invalid PCB2 servo port: {}".format(
-                    self.port_num
+                "Invalid PCB servo Socket ID: {} (expected {}..{})".format(
+                    self.port_num,
+                    SERVO_SOCKET_MIN,
+                    SERVO_SOCKET_MAX,
                 )
             )
 
-        self.channel = SERVO_PORT_TO_CHANNEL[
-            self.port_num
-        ]
+        self.channel = self.port_num
 
         # motion state - same as V1
         self.pos = 90.0
@@ -253,7 +240,7 @@ class Servo:
         self._write_pwm(self.pos)
 
         print(
-            "[PCB2] SERVO{} -> PCA CH{}".format(
+            "[PCB2] SOCKET{} -> PCA CH{}".format(
                 self.port_num,
                 self.channel
             )

@@ -330,6 +330,14 @@ while True:
             rcvstate = line.decode().strip()
             print("RX:", rcvstate)
 
+            # Explicit MCP one-shot/temporary actions are a separate UART
+            # namespace from normal XiaoZhi expression states.  The RP2040
+            # owns the requested action for exactly 2 seconds.
+            if rcvstate.startswith("action:"):
+                action_name = rcvstate[7:].strip()
+                animation.start_mcp_action(action_name, now)
+                continue
+
             # Speech activity and expression are two separate dimensions.
             # "speaking" starts the mouth animation.
             # happy/sad only change expression and leave speech_active untouched.
@@ -389,29 +397,51 @@ while True:
 
     else:
         calibrate_bool = False
-        # GP21 affects ONLY Grove Vision / face tracking.
-        facetrack_enabled = _update_facetrack_toggle()
 
-        # XiaoZhi animations keep running whether Facetrack is ON or OFF.
-        animation.apply_state(animation.current_state)
+        # MCP actions have priority over normal State / Speaking / random Blink
+        # / Vision for a fixed 2-second window.  update_mcp_action() returns
+        # False on the exact loop where that window expires, so the newest
+        # normal state resumes immediately without an extra dead frame.
+        mcp_owns_servos = animation.update_mcp_action(now)
 
-        animation.update_blink(
-            now,
-            animation.current_state,
-            enabled=True,
-        )
+        if mcp_owns_servos:
+            # Keep background systems alive logically but prevent any of them
+            # from issuing competing servo commands during MCP ownership.
+            animation.update_blink(
+                now,
+                animation.current_state,
+                enabled=False,
+            )
+            eye_follower.update(
+                now,
+                animation.current_state,
+                enabled=False,
+            )
 
-        # When GP21 is OFF, vision.py pauses new Vision AI requests and
-        # performs no visual-follow servo writes.
-        eye_follower.update(
-            now,
-            animation.current_state,
-            enabled=facetrack_enabled,
-        )
+        else:
+            # GP21 affects ONLY Grove Vision / face tracking.
+            facetrack_enabled = _update_facetrack_toggle()
 
-        # MOU is independent from current emotion.  Run this after all
-        # expression/vision updates so speech has final ownership of the mouth.
-        animation.update_speaking_mouth(now, speech_active)
+            # XiaoZhi animations keep running whether Facetrack is ON or OFF.
+            animation.apply_state(animation.current_state)
+
+            animation.update_blink(
+                now,
+                animation.current_state,
+                enabled=True,
+            )
+
+            # When GP21 is OFF, vision.py pauses new Vision AI requests and
+            # performs no visual-follow servo writes.
+            eye_follower.update(
+                now,
+                animation.current_state,
+                enabled=facetrack_enabled,
+            )
+
+            # MOU is independent from current emotion.  Run this after all
+            # expression/vision updates so speech has final ownership of the mouth.
+            animation.update_speaking_mouth(now, speech_active)
         
     front_LED.value(calibrate_bool)
 

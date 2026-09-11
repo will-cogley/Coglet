@@ -10,10 +10,10 @@ last_toggle_b = time.ticks_ms()
 new_state_flag = True
 
 # ============================================================
-# Speaking: left/right neck shaking (ROL / SERVO8)
+# Speaking: neck roll left/right (ROL / Socket 9 / CH9)
 #
 # PCB V2 verified mapping:
-#   ROL -> SERVO8 -> PCA CH9 -> neck left/right
+#   ROL -> Socket 9 -> PCA CH9 -> Neck Roll left/right
 # Center position is 90 degrees.
 # ============================================================
 SPEAKING_NECK_LEFT = 65
@@ -28,8 +28,8 @@ last_speaking_neck_toggle = time.ticks_ms()
 # Ears: alternating motion in Speaking + slower in Listening
 #
 # Verified PCB V2 mapping:
-#   EAR -> SERVO1 -> PCA CH0 -> right ear
-#   EAL -> SERVO2 -> PCA CH1 -> left ear
+#   EAR -> Socket 0 -> PCA CH0 -> Right Ear
+#   EAL -> Socket 1 -> PCA CH1 -> Left Ear
 #
 # The ear servos are mounted as a mirror pair.
 # Therefore use the SAME numeric command on both ears.
@@ -108,7 +108,7 @@ last_listening_ear_toggle = time.ticks_ms()
 # Speaking mouth: smooth, slow random opening/closing
 #
 # Verified PCB V2 mapping:
-#   MOU -> SERVO4 -> PCA CH3 -> mouth
+#   MOU -> Socket 3 -> PCA CH3 -> Mouth
 #
 # The mouth alternates between a random OPEN range and a random
 # CLOSED range. Alternating the two ranges guarantees visible movement,
@@ -259,7 +259,7 @@ def update_speaking_mouth(now, speaking_active):
 #   speaking / listening / thinking
 #
 # Verified mapping:
-#   LID -> SERVO3 -> PCA CH2 -> eyelid
+#   LID -> Socket 2 -> PCA CH2 -> Eyelid
 #
 # IMPORTANT:
 # Blink commands use Servo.set_immediate(), so there is NO software
@@ -383,17 +383,19 @@ def update_blink(now, state_name, enabled=True):
 
 
 servos = {
-    # PCB V2.0 compatibility mapping.
-    # pin_num now means PHYSICAL SERVO SOCKET number, not RP2040 GPIO.
-    "YAW": Servo(pin_num=9, max_speed=400, max_accel=100, min_angle=30, max_angle=150), # Base / body yaw
-    "ROL": Servo(pin_num=8, max_speed=600, max_accel=400, min_angle=30, max_angle=120), # V2 neck left-right (legacy ROL name)
-    "PIT": Servo(pin_num=7, max_speed=600, max_accel=400, min_angle=1, max_angle=80), # Neck pitch
-    "MOU": Servo(pin_num=4, max_speed=50000, max_accel=10000, min_angle=5, max_angle=150), # Mouth
-    "EYL": Servo(pin_num=6, max_speed=250, max_accel=10000, min_angle=50, max_angle=140), # Left eyeball
-    "EYR": Servo(pin_num=5, max_speed=250, max_accel=10000, min_angle=50, max_angle=140), # Right eyeball
-    "LID": Servo(pin_num=3, max_speed=LID_POSE_MAX_SPEED, max_accel=LID_POSE_MAX_ACCEL, min_angle=30, max_angle=160), # Eyelid
-    "EAL": Servo(pin_num=2, max_speed=250, max_accel=200, min_angle=60, max_angle=150), # Left ear
-    "EAR": Servo(pin_num=1, max_speed=500, max_accel=200, min_angle=30, max_angle=120), # Right ear
+    # PCB physical servo connector semantics.
+    # pin_num is the PCB-printed Socket ID, and Socket ID == PCA9685 channel.
+    # This keeps the PCB silkscreen, customer servo table, and code identical.
+    # Named servos currently use sockets/channels: 0,1,2,3,4,5,8,9,10.
+    "YAW": Servo(pin_num=10, max_speed=400, max_accel=100, min_angle=30, max_angle=150), # Base Yaw      -> Socket 10 / CH10
+    "ROL": Servo(pin_num=9,  max_speed=600, max_accel=400, min_angle=30, max_angle=120), # Neck Roll     -> Socket 9  / CH9
+    "PIT": Servo(pin_num=8,  max_speed=600, max_accel=400, min_angle=1, max_angle=80),   # Neck Pitch    -> Socket 8  / CH8
+    "MOU": Servo(pin_num=3,  max_speed=50000, max_accel=10000, min_angle=5, max_angle=150), # Mouth       -> Socket 3  / CH3
+    "EYL": Servo(pin_num=4,  max_speed=250, max_accel=10000, min_angle=50, max_angle=140), # Left Eye     -> Socket 4  / CH4
+    "EYR": Servo(pin_num=5,  max_speed=250, max_accel=10000, min_angle=50, max_angle=140), # Right Eye    -> Socket 5  / CH5
+    "LID": Servo(pin_num=2,  max_speed=LID_POSE_MAX_SPEED, max_accel=LID_POSE_MAX_ACCEL, min_angle=30, max_angle=160), # Eyelid -> Socket 2 / CH2
+    "EAL": Servo(pin_num=1,  max_speed=250, max_accel=200, min_angle=60, max_angle=150), # Left Ear      -> Socket 1  / CH1
+    "EAR": Servo(pin_num=0,  max_speed=500, max_accel=200, min_angle=30, max_angle=120), # Right Ear     -> Socket 0  / CH0
 }
 
 # ============================================================
@@ -417,6 +419,337 @@ def reset_servo_motion_defaults():
         default_speed, default_accel = SERVO_MOTION_DEFAULTS[name]
         servo.max_speed = default_speed
         servo.max_accel = default_accel
+
+
+# ============================================================
+# Explicit MCP actions (ESP -> UART "action:<name>")
+#
+# These are NOT expression states.  They temporarily take ownership of the
+# servos for a fixed 2-second window, then the latest normal state is
+# re-entered.  Calibration still has absolute priority in main.py.
+#
+# Supported ESP action names:
+#   action:shake_head  -> ROL
+#   action:blink       -> LID
+#   action:left_ear    -> EAL
+#   action:right_ear   -> EAR
+#   action:ears        -> EAL + EAR
+#
+# While an MCP action owns the servos, main.py pauses normal State animation,
+# random blinking, Grove Vision tracking, and speaking-mouth motion.  This is
+# intentional: a request such as "move your left ear" should visibly move only
+# that requested part for the 2-second action window.
+# ============================================================
+MCP_ACTION_DURATION_MS = 2000
+
+MCP_ACTION_NAMES = (
+    "shake_head",
+    "blink",
+    "left_ear",
+    "right_ear",
+    "ears",
+)
+
+# Keep the old action geometry/cadence that was copied from Speaking.
+MCP_HEAD_ANGLE_A = SPEAKING_NECK_LEFT
+MCP_HEAD_ANGLE_B = SPEAKING_NECK_RIGHT
+MCP_HEAD_INTERVAL_MS = SPEAKING_NECK_INTERVAL_MS
+
+MCP_EAR_ANGLE_A = EAR_ANGLE_A
+MCP_EAR_ANGLE_B = EAR_ANGLE_B
+MCP_EAR_INTERVAL_MS = SPEAKING_EAR_INTERVAL_MS
+MCP_EAR_MAX_SPEED = SPEAKING_EAR_MAX_SPEED
+MCP_EAR_MAX_ACCEL = SPEAKING_EAR_MAX_ACCEL
+
+# A 400 ms blink cycle gives repeated, readable blinks throughout the 2 s
+# ownership window: 120 ms closed + 280 ms open.
+MCP_BLINK_CYCLE_MS = 400
+MCP_BLINK_CLOSED_MS = BLINK_DURATION_MS
+
+_mcp_action = {
+    "name": None,
+    "started_at": 0,
+    "last_toggle": 0,
+    "side": False,
+    "lid_restore_angle": float(BLINK_DEFAULT_OPEN_ANGLE),
+}
+
+
+def _freeze_all_servos_for_mcp():
+    """Stop every currently-moving axis exactly where it is."""
+    for servo in servos.values():
+        if servo.enabled:
+            # set_immediate(current pos) also clears residual velocity, so a
+            # previous State cannot keep coasting while the MCP action owns
+            # the robot.
+            servo.set_immediate(servo.pos)
+
+
+def _mcp_lid_restore_angle():
+    """Choose the eyelid open/restore angle using the normal blink rules."""
+    lid = servos["LID"]
+    current_target = float(lid.target)
+
+    if current_target <= BLINK_CLOSED_ANGLE + 5:
+        return float(BLINK_DEFAULT_OPEN_ANGLE)
+
+    return min(
+        float(BLINK_DEFAULT_OPEN_ANGLE),
+        current_target,
+    )
+
+
+def mcp_action_active():
+    return _mcp_action["name"] is not None
+
+
+def start_mcp_action(action_name, now=None):
+    """
+    Start/restart one explicit MCP action.
+
+    A new MCP action immediately replaces an older MCP action and receives a
+    fresh 2-second ownership window.  The latest normal current_state is still
+    allowed to update in main.py while this action is running; it simply is not
+    applied until MCP ownership ends.
+    """
+    global new_state_flag
+
+    if now is None:
+        now = time.ticks_ms()
+
+    action_name = str(action_name).strip().lower()
+
+    # Accept a few legacy spelling variants without changing the five public
+    # ESP tool names.
+    aliases = {
+        "ear_wiggle": "ears",
+        "ears_wiggle": "ears",
+        "left_ear_wiggle": "left_ear",
+        "right_ear_wiggle": "right_ear",
+    }
+    action_name = aliases.get(action_name, action_name)
+
+    if action_name not in MCP_ACTION_NAMES:
+        print("[MCP] unknown action:", action_name)
+        return False
+
+    old_action = _mcp_action["name"]
+
+    # If an older MCP blink is being replaced, do not leave LID closed before
+    # freezing the current pose for the new action.
+    if old_action == "blink":
+        servos["LID"].set_immediate(
+            _mcp_action["lid_restore_angle"]
+        )
+
+    # Cancel any normal random blink cleanly before MCP ownership begins.
+    # This also restores LID if a random blink happened to be in progress.
+    update_blink(
+        now,
+        current_state,
+        enabled=False,
+    )
+
+    # Capture the current expression's intended eyelid-open position BEFORE
+    # freezing the servos.  Freezing intentionally changes each target to the
+    # current physical/interpolated position.
+    lid_restore_angle = _mcp_lid_restore_angle()
+
+    # Every explicit action starts from the declaration defaults, then applies
+    # only the temporary tuning it needs.  Normal State tuning is restored by
+    # re-entering current_state after the action ends.
+    reset_servo_motion_defaults()
+    _freeze_all_servos_for_mcp()
+
+    _mcp_action["name"] = action_name
+    _mcp_action["started_at"] = now
+    _mcp_action["last_toggle"] = now
+    _mcp_action["side"] = False
+    _mcp_action["lid_restore_angle"] = lid_restore_angle
+
+    if action_name == "shake_head":
+        servos["ROL"].max_speed = SERVO_MOTION_DEFAULTS["ROL"][0]
+        servos["ROL"].max_accel = SERVO_MOTION_DEFAULTS["ROL"][1]
+        servos["ROL"].set_target(MCP_HEAD_ANGLE_A)
+
+    elif action_name == "blink":
+        servos["LID"].set_immediate(BLINK_CLOSED_ANGLE)
+
+    elif action_name == "left_ear":
+        servos["EAL"].max_speed = MCP_EAR_MAX_SPEED
+        servos["EAL"].max_accel = MCP_EAR_MAX_ACCEL
+        servos["EAL"].set_target(MCP_EAR_ANGLE_A)
+
+    elif action_name == "right_ear":
+        servos["EAR"].max_speed = MCP_EAR_MAX_SPEED
+        servos["EAR"].max_accel = MCP_EAR_MAX_ACCEL
+        servos["EAR"].set_target(MCP_EAR_ANGLE_A)
+
+    elif action_name == "ears":
+        servos["EAL"].max_speed = MCP_EAR_MAX_SPEED
+        servos["EAR"].max_speed = MCP_EAR_MAX_SPEED
+        servos["EAL"].max_accel = MCP_EAR_MAX_ACCEL
+        servos["EAR"].max_accel = MCP_EAR_MAX_ACCEL
+        # Same numeric angle is intentional: the two ear mechanisms are a
+        # mirror pair, producing opposite/symmetric physical movement.
+        servos["EAL"].set_target(MCP_EAR_ANGLE_A)
+        servos["EAR"].set_target(MCP_EAR_ANGLE_A)
+
+    # The normal state must re-enter cleanly after MCP ownership ends.
+    new_state_flag = True
+
+    if old_action is None:
+        print("[MCP] START {} -> 2000 ms exclusive ownership".format(action_name))
+    else:
+        print(
+            "[MCP] REPLACE {} -> {} -> fresh 2000 ms ownership".format(
+                old_action,
+                action_name,
+            )
+        )
+
+    return True
+
+
+def _finish_mcp_action(now=None, reason="timeout"):
+    """Release MCP ownership and prepare the latest normal state to resume."""
+    global new_state_flag
+
+    if _mcp_action["name"] is None:
+        return
+
+    if now is None:
+        now = time.ticks_ms()
+
+    old_action = _mcp_action["name"]
+
+    if old_action == "blink":
+        servos["LID"].set_immediate(
+            _mcp_action["lid_restore_angle"]
+        )
+
+    _mcp_action["name"] = None
+
+    # Remove temporary MCP speed/acceleration tuning.  The latest State will
+    # then re-apply any state-specific tuning through new_state_flag.
+    reset_servo_motion_defaults()
+    new_state_flag = True
+
+    print(
+        "[MCP] END {} ({}) -> resume state {}".format(
+            old_action,
+            reason,
+            current_state,
+        )
+    )
+
+
+def update_mcp_action(now=None):
+    """
+    Advance the active MCP action without blocking.
+
+    Returns True while MCP still owns the servos.  Returns False when no MCP
+    action is active, including the same loop in which the 2-second timeout is
+    reached; main.py can therefore resume the normal State immediately.
+    """
+    if now is None:
+        now = time.ticks_ms()
+
+    action_name = _mcp_action["name"]
+    if action_name is None:
+        return False
+
+    if (
+        time.ticks_diff(now, _mcp_action["started_at"])
+        >= MCP_ACTION_DURATION_MS
+    ):
+        _finish_mcp_action(now, reason="timeout")
+        return False
+
+    # Re-assert temporary motion limits in case a new normal State arrived
+    # over UART while MCP ownership was active and reset declaration defaults.
+    if action_name == "shake_head":
+        servos["ROL"].max_speed = SERVO_MOTION_DEFAULTS["ROL"][0]
+        servos["ROL"].max_accel = SERVO_MOTION_DEFAULTS["ROL"][1]
+
+        if (
+            time.ticks_diff(now, _mcp_action["last_toggle"])
+            >= MCP_HEAD_INTERVAL_MS
+        ):
+            _mcp_action["side"] = not _mcp_action["side"]
+            servos["ROL"].set_target(
+                MCP_HEAD_ANGLE_B
+                if _mcp_action["side"]
+                else MCP_HEAD_ANGLE_A
+            )
+            _mcp_action["last_toggle"] = now
+
+    elif action_name == "blink":
+        cycle_pos = (
+            time.ticks_diff(now, _mcp_action["started_at"])
+            % MCP_BLINK_CYCLE_MS
+        )
+
+        if cycle_pos < MCP_BLINK_CLOSED_MS:
+            servos["LID"].set_immediate(BLINK_CLOSED_ANGLE)
+        else:
+            servos["LID"].set_immediate(
+                _mcp_action["lid_restore_angle"]
+            )
+
+    elif action_name == "left_ear":
+        servos["EAL"].max_speed = MCP_EAR_MAX_SPEED
+        servos["EAL"].max_accel = MCP_EAR_MAX_ACCEL
+
+        if (
+            time.ticks_diff(now, _mcp_action["last_toggle"])
+            >= MCP_EAR_INTERVAL_MS
+        ):
+            _mcp_action["side"] = not _mcp_action["side"]
+            servos["EAL"].set_target(
+                MCP_EAR_ANGLE_B
+                if _mcp_action["side"]
+                else MCP_EAR_ANGLE_A
+            )
+            _mcp_action["last_toggle"] = now
+
+    elif action_name == "right_ear":
+        servos["EAR"].max_speed = MCP_EAR_MAX_SPEED
+        servos["EAR"].max_accel = MCP_EAR_MAX_ACCEL
+
+        if (
+            time.ticks_diff(now, _mcp_action["last_toggle"])
+            >= MCP_EAR_INTERVAL_MS
+        ):
+            _mcp_action["side"] = not _mcp_action["side"]
+            servos["EAR"].set_target(
+                MCP_EAR_ANGLE_B
+                if _mcp_action["side"]
+                else MCP_EAR_ANGLE_A
+            )
+            _mcp_action["last_toggle"] = now
+
+    elif action_name == "ears":
+        servos["EAL"].max_speed = MCP_EAR_MAX_SPEED
+        servos["EAR"].max_speed = MCP_EAR_MAX_SPEED
+        servos["EAL"].max_accel = MCP_EAR_MAX_ACCEL
+        servos["EAR"].max_accel = MCP_EAR_MAX_ACCEL
+
+        if (
+            time.ticks_diff(now, _mcp_action["last_toggle"])
+            >= MCP_EAR_INTERVAL_MS
+        ):
+            _mcp_action["side"] = not _mcp_action["side"]
+            ear_angle = (
+                MCP_EAR_ANGLE_B
+                if _mcp_action["side"]
+                else MCP_EAR_ANGLE_A
+            )
+            servos["EAL"].set_target(ear_angle)
+            servos["EAR"].set_target(ear_angle)
+            _mcp_action["last_toggle"] = now
+
+    return True
 
 
 def apply_pose(pose):
