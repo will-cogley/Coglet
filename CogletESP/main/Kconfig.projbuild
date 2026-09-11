@@ -625,6 +625,29 @@ config CUSTOM_WAKE_WORD_DISPLAY
     help
         Greeting sent to the server after wake word detection
 
+config USE_SECONDARY_CUSTOM_WAKE_WORD
+    bool "Enable Secondary Custom Wake Word"
+    default n
+    depends on USE_CUSTOM_WAKE_WORD
+    help
+        Enable a second custom wake word. Both the primary and secondary
+        wake words trigger the same wake action.
+
+config SECONDARY_CUSTOM_WAKE_WORD
+    string "Secondary Custom Wake Word"
+    default "hello jack"
+    depends on USE_CUSTOM_WAKE_WORD && USE_SECONDARY_CUSTOM_WAKE_WORD
+    help
+        Second custom wake word recognized by MultiNet.
+        Use pinyin for Chinese, separated by spaces.
+
+config SECONDARY_CUSTOM_WAKE_WORD_DISPLAY
+    string "Secondary Custom Wake Word Display"
+    default "Hello Jack"
+    depends on USE_CUSTOM_WAKE_WORD && USE_SECONDARY_CUSTOM_WAKE_WORD
+    help
+        Display/greeting text reported after the secondary wake word is detected.
+
 config CUSTOM_WAKE_WORD_THRESHOLD
     int "Custom Wake Word Threshold (%)"
     default 20
