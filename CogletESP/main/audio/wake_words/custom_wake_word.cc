@@ -93,12 +93,34 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
         models_ = esp_srmodel_init("model");
 #ifdef CONFIG_CUSTOM_WAKE_WORD
         threshold_ = CONFIG_CUSTOM_WAKE_WORD_THRESHOLD / 100.0f;
-        commands_.push_back({CONFIG_CUSTOM_WAKE_WORD, CONFIG_CUSTOM_WAKE_WORD_DISPLAY, "wake"});
 #endif
     } else {
         models_ = models_list;
         ParseWakenetModelConfig();
     }
+
+    // Kconfig is the source of truth for configured custom wake words.
+    // Assets/index.json normally contains the same list, but append any
+    // missing command here as a runtime safety net.
+    auto add_command_if_missing = [this](const char* command, const char* text) {
+        if (command == nullptr || text == nullptr || command[0] == '\0' || text[0] == '\0') {
+            return;
+        }
+        for (const auto& item : commands_) {
+            if (item.command == command) {
+                return;
+            }
+        }
+        commands_.push_back({command, text, "wake"});
+        ESP_LOGI(TAG, "Added configured wake command: %s (%s)", command, text);
+    };
+
+#ifdef CONFIG_CUSTOM_WAKE_WORD
+    add_command_if_missing(CONFIG_CUSTOM_WAKE_WORD, CONFIG_CUSTOM_WAKE_WORD_DISPLAY);
+#ifdef CONFIG_USE_SECONDARY_CUSTOM_WAKE_WORD
+    add_command_if_missing(CONFIG_SECONDARY_CUSTOM_WAKE_WORD, CONFIG_SECONDARY_CUSTOM_WAKE_WORD_DISPLAY);
+#endif
+#endif
 
     if (models_ == nullptr || models_->num == -1) {
         ESP_LOGE(TAG, "Failed to initialize wakenet model");
@@ -121,9 +143,71 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
     multinet_model_data_ = multinet_->create(mn_name_, duration_);
     multinet_->set_det_threshold(multinet_model_data_, threshold_);
     esp_mn_commands_clear();
+
+    // Register multiple pronunciation variants for the same wake command ID.
+    // MultiNet allows multiple phrases to share one command ID, but the
+    // phrase string itself must be unique. Therefore the extra strings
+    // below are internal labels; the explicit phoneme sequence is what
+    // phoneme-based MultiNet models match against.
+    struct WakePhonemeVariant {
+        const char* label;
+        const char* phonemes;
+    };
+
+    static constexpr WakePhonemeVariant kHelloCogletVariants[] = {
+        // Baseline / current tuned pronunciation:
+        // HH AH L OW  K AA G L EH T
+        {"hello coglet",            "hcLb KnGLfT"},
+
+        // British English candidate:
+        // LOT vowel -> AO, reduced final -let -> IH
+        {"hello coglet british",    "hcLb KeGLgT"},
+
+        // Australian English candidate:
+        // LOT vowel -> AO, reduced final -let -> AH
+        {"hello coglet australian", "hcLb KeGLcT"},
+
+        // Japanese-accented English candidate:
+        // HELLO ~ he-ro; consonant-cluster/final-stop vowel insertion
+        // HH EH R OW  K OW G UH R EH T OW
+        {"hello coglet japanese",   "hfRb KbGwRfTb"},
+
+        // Korean-accented English candidate:
+        // HELLO ~ hel-lo; vowel insertion around the GL cluster
+        // HH EH L OW  K OW G UH L L EH T
+        {"hello coglet korean",     "hfLb KbGwLLfT"},
+
+        // Mandarin-accented English candidate:
+        // Keep HELLO near baseline and allow a schwa in the GL cluster
+        // HH AH L OW  K AA G AH L EH T
+        {"hello coglet mandarin",   "hcLb KnGcLfT"},
+    };
+
     for (int i = 0; i < commands_.size(); i++) {
-        esp_mn_commands_add(i + 1, commands_[i].command.c_str());
+        if (commands_[i].command == "hello coglet") {
+            for (const auto& variant : kHelloCogletVariants) {
+                esp_err_t err = esp_mn_commands_phoneme_add(
+                    i + 1,
+                    variant.label,
+                    variant.phonemes
+                );
+                if (err != ESP_OK) {
+                    ESP_LOGW(TAG,
+                             "Failed to add Hello Coglet variant: %s (%s), err=%d",
+                             variant.label, variant.phonemes, static_cast<int>(err));
+                } else {
+                    ESP_LOGI(TAG,
+                             "Hello Coglet variant: %s -> %s",
+                             variant.label, variant.phonemes);
+                }
+            }
+        } else {
+            esp_mn_commands_add(
+                i + 1, commands_[i].command.c_str()
+            );
+        }
     }
+
     esp_mn_commands_update();
     
     multinet_->print_active_speech_commands(multinet_model_data_);
@@ -169,7 +253,13 @@ void CustomWakeWord::Feed(const std::vector<int16_t>& data) {
         for (int i = 0; i < mn_result->num && running_; i++) {
             ESP_LOGI(TAG, "Custom wake word detected: command_id=%d, string=%s, prob=%f", 
                     mn_result->command_id[i], mn_result->string, mn_result->prob[i]);
-            auto& command = commands_[mn_result->command_id[i] - 1];
+            const int command_index = mn_result->command_id[i] - 1;
+            if (command_index < 0 || command_index >= static_cast<int>(commands_.size())) {
+                ESP_LOGW(TAG, "Ignoring invalid MultiNet command_id=%d (registered=%d)",
+                         mn_result->command_id[i], static_cast<int>(commands_.size()));
+                continue;
+            }
+            auto& command = commands_[command_index];
             if (command.action == "wake") {
                 last_detected_wake_word_ = command.text;
                 running_ = false;
