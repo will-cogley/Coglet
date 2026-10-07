@@ -92,7 +92,7 @@ $ESP-TX_{GPIO17} : RP2040-RX1_{GPIO05}$
 
 Power is provided to the board via the connector in the bottom left corner using a JST-XH connector. This input powers both MCUs via 3V3 LDOs, and the servos via an isolated 5V line. 
 
-It is recommended to use a 5V, 3A power supply (eg - fast charging mobile phone adaptor). If using the Coglet USB > JST XH adaptor, must use a USBA > USBC cable. 
+**It is required to use a 5V-3A rated power supply**(eg - a USB charger with 5V-3A power rating). If using the Coglet USB > JST XH adaptor, must use a USBA > USBC cable. 
 
 The system can be powered via the programming port, but no power will be delivered to the servos (this approach can be helpful when debugging/developing on the ESP32)
 
