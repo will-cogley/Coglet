@@ -812,3 +812,45 @@ menu "TAIJIPAI_S3_CONFIG"
 endmenu
 
 endmenu
+
+# NMRobotics unified firmware: startup / reminder sound selection.
+# Reminder itself is mandatory; only its sound can be selected.
+menu "NMRobotics Coglet Sounds"
+
+    choice COGLET_BOOT_SOUND
+        prompt "Startup Sound"
+        default COGLET_BOOT_SOUND_MECHA
+        help
+            Select the startup sound. Independent of the device shell.
+            This is a build-time setting; rebuild and flash to change it.
+
+        config COGLET_BOOT_SOUND_MECHA
+            bool "Mecha Startup (Rider Awakening V2)"
+
+        config COGLET_BOOT_SOUND_EVIL
+            bool "Evil Startup (Devil Awakening)"
+
+        config COGLET_BOOT_SOUND_CAT
+            bool "Cat Startup (Neko Boot V2)"
+
+    endchoice
+
+    choice COGLET_REMINDER_SOUND
+        prompt "Reminder Sound"
+        default COGLET_REMINDER_SOUND_MECHA
+        help
+            Select only the sound played when a local Reminder fires.
+            Reminder MCP, local timing and NVS persistence are always on.
+
+        config COGLET_REMINDER_SOUND_MECHA
+            bool "Mecha Reminder (Rider Signal V2)"
+
+        config COGLET_REMINDER_SOUND_EVIL
+            bool "Evil Reminder (Devil's Invitation)"
+
+        config COGLET_REMINDER_SOUND_CAT
+            bool "Cat Reminder (Gentle Chime)"
+
+    endchoice
+
+endmenu

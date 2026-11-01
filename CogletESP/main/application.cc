@@ -10,6 +10,7 @@
 #include "assets.h"
 #include "settings.h"
 #include "coglet_reminder.h"
+#include "coglet_sounds.h"
 
 #include <cstring>
 #include <algorithm>
@@ -570,8 +571,9 @@ void Application::Start() {
         std::string message = std::string(Lang::Strings::VERSION) + ota.GetCurrentVersion();
         display->ShowNotification(message.c_str());
         display->SetChatMessage("system", "");
-        // Play the native success sound (unchanged) before enabling the mic.
-        audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
+        // Play the Menuconfig-selected startup sound before boot Auto-Awake.
+        ESP_LOGI("CogletSounds", "PLAY startup=%s", CogletSounds::BootName());
+        audio_service_.PlaySound(CogletSounds::Boot());
         if (kAutoAwakeOnBoot) {
             Schedule([this]() {
                 auto_awake_boot_pending_ = true;
@@ -662,7 +664,8 @@ void Application::MainEventLoop() {
                     ESP_LOGW("CogletReminder", "FIRE id=%lu due=%s message=%s",
                              (unsigned long)alarm.id, alarm.datetime.c_str(), alarm.message.c_str());
                     display->ShowNotification(("提醒：" + alarm.message).c_str());
-                    audio_service_.PlaySound(Lang::Sounds::OGG_EXCLAMATION);
+                    ESP_LOGI("CogletSounds", "PLAY reminder=%s", CogletSounds::ReminderName());
+                    audio_service_.PlaySound(CogletSounds::Reminder());
                 }
             }
             if (auto_awake_boot_pending_ && device_state_ == kDeviceStateIdle &&
