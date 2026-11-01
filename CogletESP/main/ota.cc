@@ -195,7 +195,10 @@ esp_err_t Ota::CheckVersion() {
             
             // 如果有时区偏移，计算本地时间
             if (cJSON_IsNumber(timezone_offset)) {
-                ts += (timezone_offset->valueint * 60 * 1000); // 转换分钟为毫秒
+                // Reminder V1: timestamp is UTC epoch milliseconds; never add timezone to it.
+                if (timezone_offset->valueint != 480) {
+                    ESP_LOGW(TAG, "Reminder V1 assumes China UTC+8; OTA offset=%d min", timezone_offset->valueint);
+                }
             }
             
             tv.tv_sec = (time_t)(ts / 1000);  // 转换毫秒为秒

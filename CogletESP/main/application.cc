@@ -9,8 +9,11 @@
 #include "mcp_server.h"
 #include "assets.h"
 #include "settings.h"
+#include "coglet_reminder.h"
 
 #include <cstring>
+#include <cctype>
+#include <algorithm>
 #include <esp_log.h>
 #include <cJSON.h>
 #include <driver/gpio.h>
@@ -19,6 +22,52 @@
 #include <uart_component.h>
 
 #define TAG "Application"
+#define AUTO_AWAKE_TAG "CogletAutoAwake"
+
+namespace {
+// V1: keep this enabled for the clean, no-chime Auto-Awake build.
+constexpr bool kAutoAwakeOnBoot = true;
+constexpr int kAutoAwakeBootDelayTicks = 4;  // Wait for native ready chime to finish.
+constexpr int kFarewellMaxWaitTicks = 20;  // 20s max to wait for a goodbye reply.
+
+// Compare complete ASR sentences, not a substring such as "提醒我睡觉".
+// This runs after cloud STT; it is not offline command recognition.
+std::string CompactSleepCommand(std::string command) {
+    static const char* const marks[] = {
+        " ", "\t", "\r", "\n", ",", ".", "!", "?", ":", ";",
+        "，", "。", "！", "？", "、", "：", "；", "　"
+    };
+    for (const auto* mark : marks) {
+        const std::string token(mark);
+        std::string::size_type pos = 0;
+        while ((pos = command.find(token, pos)) != std::string::npos) {
+            command.erase(pos, token.size());
+        }
+    }
+    std::transform(command.begin(), command.end(), command.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return command;
+}
+
+bool IsCogletSleepCommand(const std::string& asr_text) {
+    const auto text = CompactSleepCommand(asr_text);
+    static const char* const names[] = {
+        "coglet", "科格莱特", "扣格莱特", "可格莱特"
+    };
+    static const char* const commands[] = {
+        "睡觉", "去睡觉", "睡觉吧", "去睡觉吧", "休眠", "进入休眠", "睡眠",
+        "拜拜", "拜拜啦", "再见", "再见啦", "晚安", "sleep", "bye", "byebye", "goodbye", "goodnight"
+    };
+    for (const auto* command : commands) {
+        if (text == command) return true;
+        for (const auto* name : names) {
+            if (text == std::string(name) + command ||
+                text == std::string(command) + name) return true;
+        }
+    }
+    return false;
+}
+} // namespace
 
 
 static const char* const STATE_STRINGS[] = {
@@ -273,13 +322,17 @@ void Application::ToggleChatState() {
 
     if (device_state_ == kDeviceStateIdle) {
         Schedule([this]() {
+            // A physical button takes priority over a pending automatic start.
+            auto_awake_boot_pending_ = false;
+            auto_awake_sleep_latched_ = false;
+            auto_awake_goodbye_pending_ = false;
+            auto_awake_goodbye_reply_finished_ = false;
             if (!protocol_->IsAudioChannelOpened()) {
                 SetDeviceState(kDeviceStateConnecting);
                 if (!protocol_->OpenAudioChannel()) {
                     return;
                 }
             }
-
             SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
         });
     } else if (device_state_ == kDeviceStateSpeaking) {
@@ -310,13 +363,16 @@ void Application::StartListening() {
     
     if (device_state_ == kDeviceStateIdle) {
         Schedule([this]() {
+            auto_awake_boot_pending_ = false;
+            auto_awake_sleep_latched_ = false;
+            auto_awake_goodbye_pending_ = false;
+            auto_awake_goodbye_reply_finished_ = false;
             if (!protocol_->IsAudioChannelOpened()) {
                 SetDeviceState(kDeviceStateConnecting);
                 if (!protocol_->OpenAudioChannel()) {
                     return;
                 }
             }
-
             SetListeningMode(kListeningModeManualStop);
         });
     } else if (device_state_ == kDeviceStateSpeaking) {
@@ -444,6 +500,13 @@ void Application::Start() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
             SetDeviceState(kDeviceStateIdle);
+            // Automatic startup is one-shot. A server-initiated close means
+            // local standby until the user explicitly wakes the device again.
+            auto_awake_boot_pending_ = false;
+            auto_awake_goodbye_pending_ = false;
+            auto_awake_goodbye_reply_finished_ = false;
+            auto_awake_sleep_latched_ = true;
+            ESP_LOGI(AUTO_AWAKE_TAG, "CHANNEL_CLOSED: waiting for wake word / button");
         });
     });
     protocol_->OnIncomingJson([this, display](const cJSON* root) {
@@ -453,6 +516,7 @@ void Application::Start() {
             auto state = cJSON_GetObjectItem(root, "state");
             if (strcmp(state->valuestring, "start") == 0) {
                 Schedule([this]() {
+                    if (auto_awake_sleep_latched_) return;  // Ignore late TTS after sleep.
                     aborted_ = false;
                     if (device_state_ == kDeviceStateIdle || device_state_ == kDeviceStateListening) {
                         SetDeviceState(kDeviceStateSpeaking);
@@ -460,6 +524,15 @@ void Application::Start() {
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 Schedule([this]() {
+                    if (auto_awake_sleep_latched_) return;
+                    if (auto_awake_goodbye_pending_) {
+                        // Keep the speaking state until the final audio drains.
+                        // Returning to Idle here could re-enable wake word
+                        // detection while Coglet is saying goodbye.
+                        auto_awake_goodbye_reply_finished_ = true;
+                        auto_awake_goodbye_drain_ticks_ = 2;
+                        return;
+                    }
                     if (device_state_ == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {
                             SetDeviceState(kDeviceStateIdle);
@@ -473,7 +546,9 @@ void Application::Start() {
                 if (cJSON_IsString(text)) {
                     ESP_LOGI(TAG, "<< %s", text->valuestring);
                     Schedule([this, display, message = std::string(text->valuestring)]() {
-                        display->SetChatMessage("assistant", message.c_str());
+                        if (!auto_awake_sleep_latched_) {
+                            display->SetChatMessage("assistant", message.c_str());
+                        }
                     });
                 }
             }
@@ -483,6 +558,16 @@ void Application::Start() {
                 ESP_LOGI(TAG, ">> %s", text->valuestring);
                 Schedule([this, display, message = std::string(text->valuestring)]() {
                     display->SetChatMessage("user", message.c_str());
+                    if (auto_awake_sleep_latched_) return;
+                    if (IsCogletSleepCommand(message)) {
+                        // Reply first when the server has one, then enter standby.
+                        // Never restart a session automatically after goodbye.
+                        ESP_LOGI(AUTO_AWAKE_TAG, "FAREWELL_CMD: %s", message.c_str());
+                        auto_awake_boot_pending_ = false;
+                        auto_awake_goodbye_pending_ = true;
+                        auto_awake_goodbye_reply_finished_ = false;
+                        auto_awake_goodbye_timeout_ticks_ = kFarewellMaxWaitTicks;
+                    }
                 });
             }
         } else if (strcmp(type->valuestring, "llm") == 0) {
@@ -546,8 +631,15 @@ void Application::Start() {
         std::string message = std::string(Lang::Strings::VERSION) + ota.GetCurrentVersion();
         display->ShowNotification(message.c_str());
         display->SetChatMessage("system", "");
-        // Play the success sound to indicate the device is ready
+        // Play the native success sound (unchanged) before enabling the mic.
         audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
+        if (kAutoAwakeOnBoot) {
+            Schedule([this]() {
+                auto_awake_boot_pending_ = true;
+                auto_awake_boot_delay_ticks_ = kAutoAwakeBootDelayTicks;
+                ESP_LOGI(AUTO_AWAKE_TAG, "BOOT_ARMED: waiting for ready sound");
+            });
+        }
     }
 }
 
@@ -573,6 +665,11 @@ void Application::MainEventLoop() {
             MAIN_EVENT_ERROR, pdTRUE, pdFALSE, portMAX_DELAY);
 
         if (bits & MAIN_EVENT_ERROR) {
+            // Failure must fall back to local wake word, not an endless retry.
+            auto_awake_boot_pending_ = false;
+            auto_awake_goodbye_pending_ = false;
+            auto_awake_sleep_latched_ = true;
+            ESP_LOGW(AUTO_AWAKE_TAG, "NETWORK_ERROR: manual wake required");
             SetDeviceState(kDeviceStateIdle);
             Alert(Lang::Strings::ERROR, last_error_message_.c_str(), "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
         }
@@ -606,6 +703,53 @@ void Application::MainEventLoop() {
         }
 
         if (bits & MAIN_EVENT_CLOCK_TICK) {
+            // Reminder is independent of the cloud voice session. An alarm
+            // takes priority over automatic listening or a spoken reply.
+            if (CogletReminder::Instance().HasDue() &&
+                (device_state_ == kDeviceStateSpeaking ||
+                 device_state_ == kDeviceStateListening ||
+                 device_state_ == kDeviceStateConnecting)) {
+                ESP_LOGW("CogletReminder", "Due during voice session: closing audio channel");
+                auto_awake_boot_pending_ = false;
+                auto_awake_goodbye_pending_ = false;
+                auto_awake_sleep_latched_ = true;
+                if (protocol_ && protocol_->IsAudioChannelOpened()) {
+                    protocol_->CloseAudioChannel();
+                }
+                audio_service_.ResetDecoder();
+                SetDeviceState(kDeviceStateIdle);
+            }
+            if (device_state_ == kDeviceStateIdle) {
+                auto display = Board::GetInstance().GetDisplay();
+                for (const auto& alarm : CogletReminder::Instance().TakeDueIfIdle()) {
+                    ESP_LOGW("CogletReminder", "FIRE id=%lu due=%s message=%s",
+                             (unsigned long)alarm.id, alarm.datetime.c_str(), alarm.message.c_str());
+                    display->ShowNotification(("提醒：" + alarm.message).c_str());
+                    audio_service_.PlaySound(Lang::Sounds::OGG_EXCLAMATION);
+                }
+            }
+            if (auto_awake_boot_pending_ && device_state_ == kDeviceStateIdle &&
+                !auto_awake_sleep_latched_) {
+                if (auto_awake_boot_delay_ticks_ > 0) {
+                    --auto_awake_boot_delay_ticks_;
+                } else if (audio_service_.IsIdle()) {
+                    auto_awake_boot_pending_ = false;  // Boot attempts exactly once.
+                    StartAutoAwakeSession("BOOT");
+                }
+            }
+            if (auto_awake_goodbye_pending_) {
+                if (auto_awake_goodbye_timeout_ticks_ > 0) {
+                    --auto_awake_goodbye_timeout_ticks_;
+                }
+                if (auto_awake_goodbye_reply_finished_ && auto_awake_goodbye_drain_ticks_ > 0) {
+                    --auto_awake_goodbye_drain_ticks_;
+                }
+                if ((auto_awake_goodbye_reply_finished_ &&
+                     auto_awake_goodbye_drain_ticks_ == 0 && audio_service_.IsIdle()) ||
+                    auto_awake_goodbye_timeout_ticks_ == 0) {
+                    EnterManualWakeStandby("FAREWELL");
+                }
+            }
             clock_ticks_++;
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
@@ -620,12 +764,47 @@ void Application::MainEventLoop() {
     }
 }
 
+void Application::EnterManualWakeStandby(const char* reason) {
+    auto_awake_boot_pending_ = false;
+    auto_awake_goodbye_pending_ = false;
+    auto_awake_goodbye_reply_finished_ = false;
+    auto_awake_sleep_latched_ = true;
+    SetDeviceState(kDeviceStateIdle);
+    if (protocol_ && protocol_->IsAudioChannelOpened()) {
+        protocol_->SendStopListening();
+        protocol_->CloseAudioChannel();
+    }
+    ESP_LOGI(AUTO_AWAKE_TAG, "%s_SLEEP_LOCKED: wake word / button required", reason);
+}
+
+bool Application::StartAutoAwakeSession(const char* reason) {
+    if (!protocol_ || device_state_ != kDeviceStateIdle || auto_awake_sleep_latched_) {
+        return false;
+    }
+    ESP_LOGI(AUTO_AWAKE_TAG, "%s: opening audio channel", reason);
+    SetDeviceState(kDeviceStateConnecting);
+    if (!protocol_->OpenAudioChannel()) {
+        ESP_LOGW(AUTO_AWAKE_TAG, "%s_FAILED: returning to wake word standby", reason);
+        auto_awake_sleep_latched_ = true;
+        SetDeviceState(kDeviceStateIdle);
+        return false;
+    }
+    SetListeningMode(kListeningModeAutoStop);  // No AEC/realtime; reuse native VAD.
+    ESP_LOGI(AUTO_AWAKE_TAG, "%s_LISTENING: mode=auto", reason);
+    return true;
+}
+
 void Application::OnWakeWordDetected() {
     if (!protocol_) {
         return;
     }
 
     if (device_state_ == kDeviceStateIdle) {
+        auto_awake_sleep_latched_ = false;
+        auto_awake_boot_pending_ = false;
+        auto_awake_goodbye_pending_ = false;
+        auto_awake_goodbye_reply_finished_ = false;
+        ESP_LOGI(AUTO_AWAKE_TAG, "LOCAL_WAKE_WORD: resuming normal interaction");
         audio_service_.EncodeWakeWord();
 
         if (!protocol_->IsAudioChannelOpened()) {

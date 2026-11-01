@@ -81,10 +81,20 @@ private:
 
     bool has_server_time_ = false;
     bool aborted_ = false;
+    // One-shot boot Auto-Awake, with manual-wake standby after farewell or session close.
+    bool auto_awake_boot_pending_ = false;
+    int auto_awake_boot_delay_ticks_ = 0;
+    bool auto_awake_sleep_latched_ = false;
+    bool auto_awake_goodbye_pending_ = false;
+    bool auto_awake_goodbye_reply_finished_ = false;
+    int auto_awake_goodbye_timeout_ticks_ = 0;
+    int auto_awake_goodbye_drain_ticks_ = 0;
     int clock_ticks_ = 0;
     TaskHandle_t check_new_version_task_handle_ = nullptr;
     TaskHandle_t main_event_loop_task_handle_ = nullptr;
 
+    bool StartAutoAwakeSession(const char* reason);
+    void EnterManualWakeStandby(const char* reason);
     void OnWakeWordDetected();
     void CheckNewVersion(Ota& ota);
     void CheckAssetsVersion();
