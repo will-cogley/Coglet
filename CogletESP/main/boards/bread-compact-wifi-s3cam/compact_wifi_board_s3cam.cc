@@ -7,6 +7,7 @@
 #include "led/led.h"
 #include "device_state.h"
 #include "mcp_server.h"
+#include "coglet_reminder.h"
 #include "uart_component.h"
 
 #include <wifi_station.h>
@@ -260,6 +261,53 @@ private:
                 return true;
             }
         );
+
+
+        // Coglet Reminder V1: independent of AEC and active after cloud conversation ends.
+        mcp_server.AddTool(
+            "self.coglet.reminder.get_time",
+            "设置任何提醒之前，先调用本工具获取 Coglet 设备的北京时间。\n"
+            "再计算用户说的今天、明天、后天或者几分钟后的准确日期时间。",
+            PropertyList(),
+            [](const PropertyList&) -> ReturnValue {
+                return CogletReminder::Instance().Now();
+            }
+        );
+
+        mcp_server.AddTool(
+            "self.coglet.reminder.create",
+            "创建一次性设备本地提醒。必须先调用 self.coglet.reminder.get_time 获取当前北京时间。\n"
+            "datetime 必须为北京时间 YYYY-MM-DD HH:MM:SS，不能写模糊时间或 UTC 偏移。\n"
+            "message 是用户需要提醒的事情。只有本工具返回已保存，才可告诉用户提醒已成功设置。\n"
+            "实验版到点播放提醒音，提醒内容写入日志，不支持任意文字语音朗读。",
+            PropertyList({
+                Property("datetime", kPropertyTypeString),
+                Property("message", kPropertyTypeString)
+            }),
+            [](const PropertyList& p) -> ReturnValue {
+                return CogletReminder::Instance().Create(
+                    p["datetime"].value<std::string>(), p["message"].value<std::string>());
+            }
+        );
+
+        mcp_server.AddTool(
+            "self.coglet.reminder.list",
+            "查询 Coglet 内部存储的全部未触发提醒；需要取消时先查找提醒编号。",
+            PropertyList(),
+            [](const PropertyList&) -> ReturnValue {
+                return CogletReminder::Instance().List();
+            }
+        );
+
+        mcp_server.AddTool(
+            "self.coglet.reminder.cancel",
+            "按编号取消 Coglet 的一条提醒。取消前优先调用 self.coglet.reminder.list 确认编号。",
+            PropertyList({Property("id", kPropertyTypeInteger, 1, 2147483647)}),
+            [](const PropertyList& p) -> ReturnValue {
+                return CogletReminder::Instance().Cancel(p["id"].value<int>());
+            }
+        );
+        ESP_LOGI(TAG, "Registered 4 Coglet reminder MCP tools");
 
         ESP_LOGI(TAG, "Registered 5 Coglet motion MCP tools");
     }
