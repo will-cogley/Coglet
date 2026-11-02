@@ -186,7 +186,12 @@ private:
             ESP_LOGW(TAG, "GC0308 factory automatic controls failed");
         }
 
-        ESP_LOGW(TAG, "Camera initialized successfully; camera MCP tool is available");
+        // Preserve the camera pointer/MCP registration, but stop continuous
+        // capture until a user actually requests a photo.
+        if (!camera_->StopStream()) {
+            ESP_LOGW(TAG, "Camera could not enter standby; photo capture remains available");
+        }
+        ESP_LOGW(TAG, "Camera initialized; camera MCP remains available (standby stream)");
     }
 
     void InitializeButtons() {
