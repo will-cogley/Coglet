@@ -27,7 +27,10 @@
 namespace {
 // V1: keep this enabled for the clean, no-chime Auto-Awake build.
 constexpr bool kAutoAwakeOnBoot = true;
-constexpr int kAutoAwakeBootDelayTicks = 4;  // Wait for native ready chime to finish.
+constexpr int kAutoAwakeBootDelayTicks = 4;  // Keep the existing startup sound guard.
+constexpr int kAutoAwakePrepareSettleTicks = 2;  // Separate AFE allocation from UDP setup.
+constexpr int kAudioSendBackoffMs[] = {120, 240, 400};  // Bounded, no task sleeps.
+constexpr int kAudioSendBurstLimit = 2;  // Do not burst an entire queued backlog into Wi-Fi.
 } // namespace
 
 
@@ -615,9 +618,29 @@ void Application::MainEventLoop() {
         }
 
         if (bits & MAIN_EVENT_SEND_AUDIO) {
-            while (auto packet = audio_service_.PopPacketFromSendQueue()) {
-                if (protocol_ && !protocol_->SendAudio(std::move(packet))) {
-                    break;
+            // Audio callbacks arrive every ~60 ms. Avoid retrying a congested UDP
+            // socket at that rate, but never stall the main event loop or queue
+            // old speech for later playback at the server.
+            const bool uplink_active = device_state_ == kDeviceStateListening ||
+                (device_state_ == kDeviceStateSpeaking && listening_mode_ == kListeningModeRealtime);
+            if (uplink_active && protocol_ &&
+                esp_timer_get_time() >= audio_send_retry_after_us_) {
+                for (int sent = 0; sent < kAudioSendBurstLimit; ++sent) {
+                    auto packet = audio_service_.PopPacketFromSendQueue();
+                    if (!packet) {
+                        break;
+                    }
+                    if (!protocol_->SendAudio(std::move(packet))) {
+                        if (audio_send_failure_streak_ < 3) {
+                            ++audio_send_failure_streak_;
+                        }
+                        const int delay_ms = kAudioSendBackoffMs[audio_send_failure_streak_ - 1];
+                        audio_send_retry_after_us_ = esp_timer_get_time() +
+                            static_cast<int64_t>(delay_ms) * 1000;
+                        break;
+                    }
+                    audio_send_failure_streak_ = 0;
+                    audio_send_retry_after_us_ = 0;
                 }
             }
         }
@@ -673,8 +696,18 @@ void Application::MainEventLoop() {
                 if (auto_awake_boot_delay_ticks_ > 0) {
                     --auto_awake_boot_delay_ticks_;
                 } else if (audio_service_.IsIdle()) {
-                    auto_awake_boot_pending_ = false;  // Boot attempts exactly once.
-                    StartAutoAwakeSession("BOOT");
+                    if (!auto_awake_processor_prepared_) {
+                        // AFE/model memory allocation can be large. Prepare it
+                        // while no UDP audio channel exists, then let Wi-Fi and
+                        // the allocator settle before the one-shot boot session.
+                        audio_service_.PrepareVoiceProcessing();
+                        auto_awake_processor_prepared_ = true;
+                        auto_awake_boot_delay_ticks_ = kAutoAwakePrepareSettleTicks;
+                        ESP_LOGI(AUTO_AWAKE_TAG, "BOOT_PREPARED: delaying UDP session setup");
+                    } else {
+                        auto_awake_boot_pending_ = false;  // Boot attempts exactly once.
+                        StartAutoAwakeSession("BOOT");
+                    }
                 }
             }
             clock_ticks_++;
@@ -768,6 +801,12 @@ void Application::SetDeviceState(DeviceState state) {
     }
     
     clock_ticks_ = 0;
+    // A new voice turn or channel must not inherit an earlier send failure.
+    if (state != kDeviceStateListening &&
+        !(state == kDeviceStateSpeaking && listening_mode_ == kListeningModeRealtime)) {
+        audio_send_failure_streak_ = 0;
+        audio_send_retry_after_us_ = 0;
+    }
     auto previous_state = device_state_;
     device_state_ = state;
     ESP_LOGI(TAG, "STATE: %s", STATE_STRINGS[device_state_]);

@@ -6,6 +6,7 @@
 #include <freertos/task.h>
 #include <esp_timer.h>
 
+#include <cstdint>
 #include <string>
 #include <mutex>
 #include <deque>
@@ -85,7 +86,11 @@ private:
     // button activation is required to start another conversation.
     bool auto_awake_boot_pending_ = false;
     int auto_awake_boot_delay_ticks_ = 0;
+    bool auto_awake_processor_prepared_ = false;
     bool auto_awake_sleep_latched_ = false;
+    // Non-blocking uplink retry gate (monotonic microseconds).
+    int64_t audio_send_retry_after_us_ = 0;
+    uint8_t audio_send_failure_streak_ = 0;
     int clock_ticks_ = 0;
     TaskHandle_t check_new_version_task_handle_ = nullptr;
     TaskHandle_t main_event_loop_task_handle_ = nullptr;
