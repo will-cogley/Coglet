@@ -39,7 +39,10 @@
 #define MAX_ENCODE_TASKS_IN_QUEUE 2
 #define MAX_PLAYBACK_TASKS_IN_QUEUE 2
 #define MAX_DECODE_PACKETS_IN_QUEUE (2400 / OPUS_FRAME_DURATION_MS)
-#define MAX_SEND_PACKETS_IN_QUEUE (2400 / OPUS_FRAME_DURATION_MS)
+// Under packet loss, keep at most ~0.84 s of the newest uplink audio.
+// Stale voice frames are worse than a small gap for real-time ASR.
+#define MAX_SEND_PACKETS_IN_QUEUE (840 / OPUS_FRAME_DURATION_MS)
+#define MAX_SEND_PACKET_AGE_MS 900
 #define AUDIO_TESTING_MAX_DURATION_MS 10000
 #define MAX_TIMESTAMPS_IN_QUEUE 3
 
@@ -70,6 +73,7 @@ struct AudioTask {
     AudioTaskType type;
     std::vector<int16_t> pcm;
     uint32_t timestamp;
+    uint32_t uplink_generation = 0;
 };
 
 struct DebugStatistics {
@@ -98,6 +102,8 @@ public:
 
     void EnableWakeWordDetection(bool enable);
     void EnableVoiceProcessing(bool enable);
+    // Initialize the processor without enabling its capture/encode pipeline.
+    void PrepareVoiceProcessing();
     void EnableAudioTesting(bool enable);
     void EnableDeviceAec(bool enable);
 
@@ -133,7 +139,13 @@ private:
     std::mutex audio_queue_mutex_;
     std::condition_variable audio_queue_cv_;
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_decode_queue_;
-    std::deque<std::unique_ptr<AudioStreamPacket>> audio_send_queue_;
+    struct TimedSendPacket {
+        std::unique_ptr<AudioStreamPacket> packet;
+        std::chrono::steady_clock::time_point enqueued_at;
+    };
+    std::deque<TimedSendPacket> audio_send_queue_;
+    uint32_t uplink_generation_ = 0;  // Ignore in-flight encodes from the last session.
+    bool uplink_active_ = false;
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_testing_queue_;
     std::deque<std::unique_ptr<AudioTask>> audio_encode_queue_;
     std::deque<std::unique_ptr<AudioTask>> audio_playback_queue_;

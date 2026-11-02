@@ -1,6 +1,7 @@
 #include "audio_service.h"
 #include <esp_log.h>
 #include <cstring>
+#include <algorithm>
 
 #if CONFIG_USE_AUDIO_PROCESSOR
 #include "processors/afe_audio_processor.h"
@@ -125,6 +126,9 @@ void AudioService::Stop() {
         AS_EVENT_AUDIO_PROCESSOR_RUNNING);
 
     std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    uplink_active_ = false;
+    ++uplink_generation_;
+    audio_send_queue_.clear();
     audio_encode_queue_.clear();
     audio_decode_queue_.clear();
     audio_playback_queue_.clear();
@@ -297,7 +301,7 @@ void AudioService::OpusCodecTask() {
         std::unique_lock<std::mutex> lock(audio_queue_mutex_);
         audio_queue_cv_.wait(lock, [this]() {
             return service_stopped_ ||
-                (!audio_encode_queue_.empty() && audio_send_queue_.size() < MAX_SEND_PACKETS_IN_QUEUE) ||
+                !audio_encode_queue_.empty() ||
                 (!audio_decode_queue_.empty() && audio_playback_queue_.size() < MAX_PLAYBACK_TASKS_IN_QUEUE);
         });
         if (service_stopped_) {
@@ -336,7 +340,7 @@ void AudioService::OpusCodecTask() {
         }
         
         /* Encode the audio to send queue */
-        if (!audio_encode_queue_.empty() && audio_send_queue_.size() < MAX_SEND_PACKETS_IN_QUEUE) {
+        if (!audio_encode_queue_.empty()) {
             auto task = std::move(audio_encode_queue_.front());
             audio_encode_queue_.pop_front();
             audio_queue_cv_.notify_all();
@@ -352,11 +356,20 @@ void AudioService::OpusCodecTask() {
             }
 
             if (task->type == kAudioTaskTypeEncodeToSendQueue) {
+                bool queued = false;
                 {
                     std::lock_guard<std::mutex> lock(audio_queue_mutex_);
-                    audio_send_queue_.push_back(std::move(packet));
+                    // An encode that finished after Listening stopped must not
+                    // leak into the next session or occupy the send queue.
+                    if (uplink_active_ && task->uplink_generation == uplink_generation_) {
+                        if (audio_send_queue_.size() >= MAX_SEND_PACKETS_IN_QUEUE) {
+                            audio_send_queue_.pop_front(); // Oldest first; no encoder backpressure.
+                        }
+                        audio_send_queue_.push_back({std::move(packet), std::chrono::steady_clock::now()});
+                        queued = true;
+                    }
                 }
-                if (callbacks_.on_send_queue_available) {
+                if (queued && callbacks_.on_send_queue_available) {
                     callbacks_.on_send_queue_available();
                 }
             } else if (task->type == kAudioTaskTypeEncodeToTestingQueue) {
@@ -394,6 +407,13 @@ void AudioService::PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t
     /* Push the task to the encode queue */
     std::unique_lock<std::mutex> lock(audio_queue_mutex_);
 
+    if (type == kAudioTaskTypeEncodeToSendQueue) {
+        if (!uplink_active_) {
+            return;
+        }
+        task->uplink_generation = uplink_generation_;
+    }
+
     /* If the task is to send queue, we need to set the timestamp */
     if (type == kAudioTaskTypeEncodeToSendQueue && !timestamp_queue_.empty()) {
         if (timestamp_queue_.size() <= MAX_TIMESTAMPS_IN_QUEUE) {
@@ -425,10 +445,18 @@ bool AudioService::PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> pa
 
 std::unique_ptr<AudioStreamPacket> AudioService::PopPacketFromSendQueue() {
     std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    const auto now = std::chrono::steady_clock::now();
+    // Drop packets that spent too long behind network congestion; never replay
+    // an obsolete voice fragment into a later part of the conversation.
+    while (!audio_send_queue_.empty() &&
+           now - audio_send_queue_.front().enqueued_at >
+               std::chrono::milliseconds(MAX_SEND_PACKET_AGE_MS)) {
+        audio_send_queue_.pop_front();
+    }
     if (audio_send_queue_.empty()) {
         return nullptr;
     }
-    auto packet = std::move(audio_send_queue_.front());
+    auto packet = std::move(audio_send_queue_.front().packet);
     audio_send_queue_.pop_front();
     audio_queue_cv_.notify_all();
     return packet;
@@ -474,20 +502,40 @@ void AudioService::EnableWakeWordDetection(bool enable) {
     }
 }
 
+void AudioService::PrepareVoiceProcessing() {
+    if (!audio_processor_initialized_) {
+        audio_processor_->Initialize(codec_, OPUS_FRAME_DURATION_MS, models_list_);
+        audio_processor_initialized_ = true;
+    }
+}
+
 void AudioService::EnableVoiceProcessing(bool enable) {
     ESP_LOGD(TAG, "%s voice processing", enable ? "Enabling" : "Disabling");
     if (enable) {
-        if (!audio_processor_initialized_) {
-            audio_processor_->Initialize(codec_, OPUS_FRAME_DURATION_MS, models_list_);
-            audio_processor_initialized_ = true;
-        }
-
+        PrepareVoiceProcessing();
         /* We should make sure no audio is playing */
         ResetDecoder();
         audio_input_need_warmup_ = true;
+        {
+            std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+            uplink_active_ = true;
+        }
         audio_processor_->Start();
         xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
     } else {
+        {
+            std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+            uplink_active_ = false;
+            ++uplink_generation_;
+            audio_send_queue_.clear();
+            audio_encode_queue_.erase(
+                std::remove_if(audio_encode_queue_.begin(), audio_encode_queue_.end(),
+                    [](const std::unique_ptr<AudioTask>& task) {
+                        return task->type == kAudioTaskTypeEncodeToSendQueue;
+                    }),
+                audio_encode_queue_.end());
+            audio_queue_cv_.notify_all();
+        }
         audio_processor_->Stop();
         xEventGroupClearBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
     }
@@ -508,11 +556,7 @@ void AudioService::EnableAudioTesting(bool enable) {
 
 void AudioService::EnableDeviceAec(bool enable) {
     ESP_LOGI(TAG, "%s device AEC", enable ? "Enabling" : "Disabling");
-    if (!audio_processor_initialized_) {
-        audio_processor_->Initialize(codec_, OPUS_FRAME_DURATION_MS, models_list_);
-        audio_processor_initialized_ = true;
-    }
-
+    PrepareVoiceProcessing();
     audio_processor_->EnableDeviceAec(enable);
 }
 
