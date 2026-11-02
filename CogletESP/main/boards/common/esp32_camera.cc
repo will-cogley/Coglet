@@ -615,11 +615,65 @@ Esp32Camera::Esp32Camera(const esp_video_init_config_t& config) {
 #endif  // CONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE
 }
 
-Esp32Camera::~Esp32Camera() {
-    if (streaming_on_ && video_fd_ >= 0) {
-        int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        ioctl(video_fd_, VIDIOC_STREAMOFF, &type);
+// A-mode camera parking: retain the device and MMAP allocations, but stop
+// camera/DVP DMA between photo requests. A streaming session is owned only
+// by Capture(), not by the MCP registry or the network stack.
+bool Esp32Camera::StopStream() {
+    if (!streaming_on_) return true;
+    if (video_fd_ < 0) return false;
+    int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (ioctl(video_fd_, VIDIOC_STREAMOFF, &type) != 0) {
+        ESP_LOGE(TAG, "Camera standby STREAMOFF failed: %d", errno);
+        return false;
     }
+    streaming_on_ = false;
+    stream_needs_queue_ = true;  // STREAMOFF returns buffers to dequeued state.
+    ESP_LOGI(TAG, "Camera parked (stream off, driver stays initialized)");
+    return true;
+}
+
+bool Esp32Camera::StartStream() {
+    if (streaming_on_) return true;
+    if (video_fd_ < 0 || !video_initialized_) return false;
+    if (stream_needs_queue_) {
+        for (size_t i = 0; i < mmap_buffers_.size(); ++i) {
+            struct v4l2_buffer buf = {};
+            buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+            buf.memory = V4L2_MEMORY_MMAP;
+            buf.index = static_cast<uint32_t>(i);
+            if (ioctl(video_fd_, VIDIOC_QBUF, &buf) != 0) {
+                ESP_LOGE(TAG, "Camera resume QBUF %u failed: %d", (unsigned)i, errno);
+                return false;
+            }
+        }
+    }
+    int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (ioctl(video_fd_, VIDIOC_STREAMON, &type) != 0) {
+        ESP_LOGE(TAG, "Camera resume STREAMON failed: %d", errno);
+        stream_needs_queue_ = false;  // Buffers already submitted; do not requeue blindly.
+        return false;
+    }
+    stream_needs_queue_ = false;
+    streaming_on_ = true;
+    // Give the GC0308 AEC/AWB/AGC a few frames to settle after resume.
+    vTaskDelay(pdMS_TO_TICKS(120));
+    ESP_LOGI(TAG, "Camera stream resumed on demand");
+    return true;
+}
+
+void Esp32Camera::ReleaseCapturedFrame() {
+    if (encoder_thread_.joinable()) encoder_thread_.join();
+    if (frame_.data) {
+        heap_caps_free(frame_.data);
+        frame_.data = nullptr;
+        frame_.len = 0;
+        frame_.format = 0;
+    }
+}
+
+Esp32Camera::~Esp32Camera() {
+    ReleaseCapturedFrame();
+    StopStream();
     for (auto& b : mmap_buffers_) {
         if (b.start && b.length) {
             munmap(b.start, b.length);
@@ -646,9 +700,15 @@ bool Esp32Camera::Capture() {
         encoder_thread_.join();
     }
 
-    if (!streaming_on_ || video_fd_ < 0) {
+    if (!StartStream()) {
         return false;
     }
+    // Stop the streaming peripheral on every exit, including capture failures.
+    // The captured frame copy is retained for Explain() after STREAMOFF.
+    struct StreamStopGuard {
+        Esp32Camera& camera;
+        ~StreamStopGuard() { camera.StopStream(); }
+    } stream_stop_guard{*this};
 
     for (int i = 0; i < 3; i++) {
         struct v4l2_buffer buf = {};
@@ -1477,5 +1537,6 @@ std::string Esp32Camera::Explain(const std::string& question) {
     size_t remain_stack_size = uxTaskGetStackHighWaterMark(nullptr);
     ESP_LOGI(TAG, "Explain image size=%d bytes, compressed size=%d, remain stack size=%d, question=%s\n%s",
              (int)frame_.len, (int)total_sent, (int)remain_stack_size, question.c_str(), result.c_str());
+    ReleaseCapturedFrame();  // PSRAM photo copy not needed while camera is parked.
     return result;
 }

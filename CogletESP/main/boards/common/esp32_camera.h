@@ -36,6 +36,7 @@ private:
 #endif  // CONFIG_XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
     int video_fd_ = -1;
     bool streaming_on_ = false;
+    bool stream_needs_queue_ = false;
     bool video_initialized_ = false;
     struct MmapBuffer { void *start = nullptr; size_t length = 0; };
     std::vector<MmapBuffer> mmap_buffers_;
@@ -55,6 +56,10 @@ public:
     ~Esp32Camera() override;
 
     virtual void SetExplainUrl(const std::string& url, const std::string& token);
+    // Keep the esp_video device registered; only run DVP capture on demand.
+    bool StartStream();
+    bool StopStream();
+    void ReleaseCapturedFrame();
     virtual bool Capture();
     // 翻转控制函数
     virtual bool SetHMirror(bool enabled) override;
