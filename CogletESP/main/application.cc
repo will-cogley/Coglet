@@ -29,6 +29,11 @@ namespace {
 constexpr bool kAutoAwakeOnBoot = true;
 constexpr int kAutoAwakeBootDelayTicks = 4;  // Keep the existing startup sound guard.
 constexpr int kAutoAwakePrepareSettleTicks = 2;  // Separate AFE allocation from UDP setup.
+// After a physical wake word no boot sound is playing; still use the same
+// prepare -> settle -> channel order, with a short initial debounce stage.
+constexpr int kManualWakeInitialTicks = 1;
+constexpr int kWakeAudioBurstLimit = 2;
+constexpr int kWakeAudioPaceMs = 65;  // Opus frame is 60 ms; avoid flooding a new UDP socket.
 constexpr int kAudioSendBackoffMs[] = {120, 240, 400};  // Bounded, no task sleeps.
 constexpr int kAudioSendBurstLimit = 2;  // Do not burst an entire queued backlog into Wi-Fi.
 } // namespace
@@ -286,16 +291,10 @@ void Application::ToggleChatState() {
 
     if (device_state_ == kDeviceStateIdle) {
         Schedule([this]() {
-            // A physical button takes priority over a pending automatic start.
-            auto_awake_boot_pending_ = false;
-            auto_awake_sleep_latched_ = false;
-            if (!protocol_->IsAudioChannelOpened()) {
-                SetDeviceState(kDeviceStateConnecting);
-                if (!protocol_->OpenAudioChannel()) {
-                    return;
-                }
-            }
-            SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
+            // Buttons follow the same AFE -> settle -> UDP path as wake words.
+            BeginStaggeredWake("", false,
+                aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime,
+                false);
         });
     } else if (device_state_ == kDeviceStateSpeaking) {
         Schedule([this]() {
@@ -325,15 +324,7 @@ void Application::StartListening() {
     
     if (device_state_ == kDeviceStateIdle) {
         Schedule([this]() {
-            auto_awake_boot_pending_ = false;
-            auto_awake_sleep_latched_ = false;
-            if (!protocol_->IsAudioChannelOpened()) {
-                SetDeviceState(kDeviceStateConnecting);
-                if (!protocol_->OpenAudioChannel()) {
-                    return;
-                }
-            }
-            SetListeningMode(kListeningModeManualStop);
+            BeginStaggeredWake("", false, kListeningModeManualStop, false);
         });
     } else if (device_state_ == kDeviceStateSpeaking) {
         Schedule([this]() {
@@ -606,7 +597,8 @@ void Application::MainEventLoop() {
             MAIN_EVENT_WAKE_WORD_DETECTED |
             MAIN_EVENT_VAD_CHANGE |
             MAIN_EVENT_CLOCK_TICK |
-            MAIN_EVENT_ERROR, pdTRUE, pdFALSE, portMAX_DELAY);
+            MAIN_EVENT_ERROR, pdTRUE, pdFALSE,
+            wake_session_stage_ == WakeSessionStage::Upload ? pdMS_TO_TICKS(kWakeAudioPaceMs) : portMAX_DELAY);
 
         if (bits & MAIN_EVENT_ERROR) {
             // Failure must fall back to local wake word, not an endless retry.
@@ -665,6 +657,10 @@ void Application::MainEventLoop() {
             }
         }
 
+        if (wake_session_stage_ == WakeSessionStage::Upload) {
+            PumpStaggeredWakePackets();
+        }
+
         if (bits & MAIN_EVENT_CLOCK_TICK) {
             // Reminder is independent of the cloud voice session. An alarm
             // takes priority over automatic listening or a spoken reply.
@@ -691,6 +687,9 @@ void Application::MainEventLoop() {
                     audio_service_.PlaySound(CogletSounds::Reminder());
                 }
             }
+            // Manual wakes get the same AFE-before-UDP staging every time,
+            // not just the first wake after cold boot.
+            AdvanceStaggeredWakeTick();
             if (auto_awake_boot_pending_ && device_state_ == kDeviceStateIdle &&
                 !auto_awake_sleep_latched_) {
                 if (auto_awake_boot_delay_ticks_ > 0) {
@@ -741,39 +740,136 @@ bool Application::StartAutoAwakeSession(const char* reason) {
     return true;
 }
 
-void Application::OnWakeWordDetected() {
-    if (!protocol_) {
+// LOCAL wake path is deliberately different from the boot Auto-Awake path:
+// wait until the processor is ready, give the allocator a settling interval,
+// open UDP only then, and upload historical wake audio at a measured pace.
+// There is no main-event-loop sleep and no change to the MCP protocol.
+void Application::CancelStaggeredWake() {
+    wake_session_stage_ = WakeSessionStage::None;
+    wake_session_delay_ticks_ = 0;
+    wake_session_packets_.clear();
+    wake_session_word_.clear();
+    wake_session_send_data_ = false;
+    wake_session_popup_ = false;
+    wake_session_next_send_us_ = 0;
+    wake_session_failure_streak_ = 0;
+}
+
+void Application::BeginStaggeredWake(const std::string& word, bool send_data,
+                                     ListeningMode mode, bool play_popup) {
+    if (!protocol_ || device_state_ != kDeviceStateIdle ||
+        wake_session_stage_ != WakeSessionStage::None) return;
+    auto_awake_boot_pending_ = false;  // User wake overrides pending auto-start.
+    auto_awake_sleep_latched_ = false;
+    wake_session_word_ = word;
+    wake_session_send_data_ = send_data;
+    wake_session_mode_ = mode;
+    wake_session_popup_ = play_popup;
+    if (send_data) audio_service_.EncodeWakeWord();
+    audio_service_.EnableWakeWordDetection(false); // Suppress duplicate triggers.
+    wake_session_stage_ = WakeSessionStage::Prepare;
+    wake_session_delay_ticks_ = kManualWakeInitialTicks;
+    SetDeviceState(kDeviceStateConnecting);
+    ESP_LOGI(AUTO_AWAKE_TAG, "LOCAL_WAKE_STAGE: prepare word=%s", word.c_str());
+}
+
+void Application::AdvanceStaggeredWakeTick() {
+    if (wake_session_stage_ != WakeSessionStage::Prepare &&
+        wake_session_stage_ != WakeSessionStage::Settle) return;
+    if (device_state_ != kDeviceStateConnecting || !protocol_) {
+        CancelStaggeredWake();
         return;
     }
-
-    if (device_state_ == kDeviceStateIdle) {
-        auto_awake_sleep_latched_ = false;
-        auto_awake_boot_pending_ = false;
-        ESP_LOGI(AUTO_AWAKE_TAG, "LOCAL_WAKE_WORD: resuming normal interaction");
-        audio_service_.EncodeWakeWord();
-
-        if (!protocol_->IsAudioChannelOpened()) {
-            SetDeviceState(kDeviceStateConnecting);
-            if (!protocol_->OpenAudioChannel()) {
-                audio_service_.EnableWakeWordDetection(true);
-                return;
-            }
-        }
-
-        auto wake_word = audio_service_.GetLastWakeWord();
-        ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
-#if CONFIG_SEND_WAKE_WORD_DATA
-        // Encode and send the wake word data to the server
+    if (wake_session_delay_ticks_ > 0) {
+        --wake_session_delay_ticks_;
+        return;
+    }
+    if (wake_session_stage_ == WakeSessionStage::Prepare) {
+        // Initialize AFE only if needed; repeated wakes must not reallocate it.
+        audio_service_.PrepareVoiceProcessing();
+        auto_awake_processor_prepared_ = true;
+        wake_session_stage_ = WakeSessionStage::Settle;
+        wake_session_delay_ticks_ = kAutoAwakePrepareSettleTicks;
+        ESP_LOGI(AUTO_AWAKE_TAG, "LOCAL_WAKE_PREPARED: settling before UDP");
+        return;
+    }
+    // Settle complete: open the UDP channel before sending either cached
+    // wake audio or listen/detect; never burst dozens of packets at once.
+    ESP_LOGI(AUTO_AWAKE_TAG, "LOCAL_WAKE_OPEN: opening audio channel");
+    if (!protocol_->IsAudioChannelOpened() && !protocol_->OpenAudioChannel()) {
+        ESP_LOGW(AUTO_AWAKE_TAG, "LOCAL_WAKE_FAILED: returning to standby");
+        CancelStaggeredWake();
+        auto_awake_sleep_latched_ = true;
+        SetDeviceState(kDeviceStateIdle);
+        return;
+    }
+    if (wake_session_send_data_) {
+        // The encoder started before the two settling stages. Its sentinel
+        // terminates PopWakeWordPacket(); on normal hardware it has finished
+        // by now. Keep historic audio before listen/detect, as in native code.
         while (auto packet = audio_service_.PopWakeWordPacket()) {
-            protocol_->SendAudio(std::move(packet));
+            wake_session_packets_.push_back(std::move(packet));
         }
-        // Set the chat state to wake word detected
-        protocol_->SendWakeWordDetected(wake_word);
-        SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
+        wake_session_stage_ = WakeSessionStage::Upload;
+        wake_session_next_send_us_ = esp_timer_get_time();
+        ESP_LOGI(AUTO_AWAKE_TAG, "LOCAL_WAKE_UPLOAD: %u cached frames",
+                 (unsigned)wake_session_packets_.size());
+        PumpStaggeredWakePackets();
+    } else {
+        const ListeningMode mode = wake_session_mode_;
+        const bool popup = wake_session_popup_;
+        CancelStaggeredWake();
+        SetListeningMode(mode);
+        if (popup) audio_service_.PlaySound(Lang::Sounds::OGG_POPUP);
+    }
+}
+
+void Application::PumpStaggeredWakePackets() {
+    if (wake_session_stage_ != WakeSessionStage::Upload) return;
+    if (device_state_ != kDeviceStateConnecting || !protocol_ ||
+        !protocol_->IsAudioChannelOpened()) {
+        CancelStaggeredWake();
+        auto_awake_sleep_latched_ = true;
+        SetDeviceState(kDeviceStateIdle);
+        return;
+    }
+    int64_t now = esp_timer_get_time();
+    if (now < wake_session_next_send_us_) return;
+    for (int count = 0; count < kWakeAudioBurstLimit && !wake_session_packets_.empty(); ++count) {
+        auto packet = std::move(wake_session_packets_.front());
+        wake_session_packets_.pop_front();
+        if (!protocol_->SendAudio(std::move(packet))) {
+            // Sending consumes the packet even on failure; don't retransmit
+            // stale voice data. Back off before the next cached frame.
+            if (wake_session_failure_streak_ < 3) ++wake_session_failure_streak_;
+            wake_session_next_send_us_ = esp_timer_get_time() +
+                static_cast<int64_t>(kAudioSendBackoffMs[wake_session_failure_streak_ - 1]) * 1000;
+            return;
+        }
+        wake_session_failure_streak_ = 0;
+    }
+    if (!wake_session_packets_.empty()) {
+        wake_session_next_send_us_ = esp_timer_get_time() +
+            static_cast<int64_t>(kWakeAudioPaceMs) * 1000;
+        return;
+    }
+    // Protocol ordering: cached wake audio -> detect -> listen/start.
+    protocol_->SendWakeWordDetected(wake_session_word_);
+    ESP_LOGI(AUTO_AWAKE_TAG, "LOCAL_WAKE_LISTENING: %s", wake_session_word_.c_str());
+    const ListeningMode mode = wake_session_mode_;
+    CancelStaggeredWake();
+    SetListeningMode(mode);
+}
+
+void Application::OnWakeWordDetected() {
+    if (!protocol_) return;
+    if (device_state_ == kDeviceStateIdle) {
+#if CONFIG_SEND_WAKE_WORD_DATA
+        BeginStaggeredWake(audio_service_.GetLastWakeWord(), true,
+            aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime, false);
 #else
-        SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
-        // Play the pop up sound to indicate the wake word is detected
-        audio_service_.PlaySound(Lang::Sounds::OGG_POPUP);
+        BeginStaggeredWake(audio_service_.GetLastWakeWord(), false,
+            aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime, true);
 #endif
     } else if (device_state_ == kDeviceStateSpeaking) {
         AbortSpeaking(kAbortReasonWakeWordDetected);
@@ -801,6 +897,9 @@ void Application::SetDeviceState(DeviceState state) {
     }
     
     clock_ticks_ = 0;
+    if (state == kDeviceStateIdle && wake_session_stage_ != WakeSessionStage::None) {
+        CancelStaggeredWake();
+    }
     // A new voice turn or channel must not inherit an earlier send failure.
     if (state != kDeviceStateListening &&
         !(state == kDeviceStateSpeaking && listening_mode_ == kListeningModeRealtime)) {
@@ -928,46 +1027,24 @@ bool Application::UpgradeFirmware(Ota& ota, const std::string& url) {
 }
 
 void Application::WakeWordInvoke(const std::string& wake_word) {
-    if (!protocol_) {
-        return;
-    }
-
-    if (device_state_ == kDeviceStateIdle) {
-        audio_service_.EncodeWakeWord();
-
-        if (!protocol_->IsAudioChannelOpened()) {
-            SetDeviceState(kDeviceStateConnecting);
-            if (!protocol_->OpenAudioChannel()) {
-                audio_service_.EnableWakeWordDetection(true);
-                return;
-            }
-        }
-
-        ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
+    // Some boards invoke this from other tasks; serialize all state changes
+    // with the main event loop, just like the built-in wake callback.
+    Schedule([this, wake_word]() {
+        if (!protocol_) return;
+        if (device_state_ == kDeviceStateIdle) {
 #if CONFIG_USE_AFE_WAKE_WORD || CONFIG_USE_CUSTOM_WAKE_WORD
-        // Encode and send the wake word data to the server
-        while (auto packet = audio_service_.PopWakeWordPacket()) {
-            protocol_->SendAudio(std::move(packet));
-        }
-        // Set the chat state to wake word detected
-        protocol_->SendWakeWordDetected(wake_word);
-        SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
+            BeginStaggeredWake(wake_word, true,
+                aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime, false);
 #else
-        SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
-        // Play the pop up sound to indicate the wake word is detected
-        audio_service_.PlaySound(Lang::Sounds::OGG_POPUP);
+            BeginStaggeredWake(wake_word, false,
+                aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime, true);
 #endif
-    } else if (device_state_ == kDeviceStateSpeaking) {
-        Schedule([this]() {
+        } else if (device_state_ == kDeviceStateSpeaking) {
             AbortSpeaking(kAbortReasonNone);
-        });
-    } else if (device_state_ == kDeviceStateListening) {   
-        Schedule([this]() {
-            if (protocol_) {
-                protocol_->CloseAudioChannel();
-            }
-        });
-    }
+        } else if (device_state_ == kDeviceStateListening) {
+            protocol_->CloseAudioChannel();
+        }
+    });
 }
 
 bool Application::CanEnterSleepMode() {

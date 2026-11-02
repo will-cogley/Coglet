@@ -88,6 +88,18 @@ private:
     int auto_awake_boot_delay_ticks_ = 0;
     bool auto_awake_processor_prepared_ = false;
     bool auto_awake_sleep_latched_ = false;
+    // Every LOCAL wake follows the prepare -> settle -> UDP channel -> paced
+    // wake-word audio path. Boot Auto-Awake remains a separate one-shot path.
+    enum class WakeSessionStage : uint8_t { None, Prepare, Settle, Upload };
+    WakeSessionStage wake_session_stage_ = WakeSessionStage::None;
+    int wake_session_delay_ticks_ = 0;
+    bool wake_session_send_data_ = false;
+    bool wake_session_popup_ = false;
+    ListeningMode wake_session_mode_ = kListeningModeAutoStop;
+    std::string wake_session_word_;
+    std::deque<std::unique_ptr<AudioStreamPacket>> wake_session_packets_;
+    int64_t wake_session_next_send_us_ = 0;
+    uint8_t wake_session_failure_streak_ = 0;
     // Non-blocking uplink retry gate (monotonic microseconds).
     int64_t audio_send_retry_after_us_ = 0;
     uint8_t audio_send_failure_streak_ = 0;
@@ -96,6 +108,11 @@ private:
     TaskHandle_t main_event_loop_task_handle_ = nullptr;
 
     bool StartAutoAwakeSession(const char* reason);
+    void BeginStaggeredWake(const std::string& word, bool send_data,
+                            ListeningMode mode, bool play_popup);
+    void AdvanceStaggeredWakeTick();
+    void PumpStaggeredWakePackets();
+    void CancelStaggeredWake();
     void OnWakeWordDetected();
     void CheckNewVersion(Ota& ota);
     void CheckAssetsVersion();
