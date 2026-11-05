@@ -677,9 +677,25 @@ config USE_DEVICE_AEC
         || BOARD_TYPE_LICHUANG_DEV_S3 || BOARD_TYPE_ESP_KORVO2_V3 || BOARD_TYPE_WAVESHARE_S3_TOUCH_AMOLED_1_75 || BOARD_TYPE_WAVESHARE_S3_TOUCH_LCD_1_83\
         || BOARD_TYPE_WAVESHARE_S3_TOUCH_AMOLED_2_06 || BOARD_TYPE_WAVESHARE_S3_TOUCH_LCD_4B || BOARD_TYPE_WAVESHARE_P4_WIFI6_TOUCH_LCD_4B || BOARD_TYPE_WAVESHARE_P4_WIFI6_TOUCH_LCD_7B \
         || BOARD_TYPE_WAVESHARE_P4_WIFI6_TOUCH_LCD_XC || BOARD_TYPE_ESP_S3_LCD_EV_Board_2 || BOARD_TYPE_YUNLIAO_S3 \
-        || BOARD_TYPE_ECHOEAR || BOARD_TYPE_WAVESHARE_S3_TOUCH_LCD_3_49)
+        || BOARD_TYPE_ECHOEAR || BOARD_TYPE_WAVESHARE_S3_TOUCH_LCD_3_49 \
+        || BOARD_TYPE_BREAD_COMPACT_WIFI_CAM)
     help
         To work properly, device-side AEC requires a clean output reference path from the speaker signal and physical acoustic isolation between the microphone and speaker.
+        On Coglet (BOARD_TYPE_BREAD_COMPACT_WIFI_CAM) there is no hardware reference path; the
+        reference is taken digitally from the speaker I2S DMA (software loopback). Enabling this
+        also enables realtime listening, so the user can interrupt Coglet while it speaks.
+
+config COGLET_AEC_REF_DELAY_MS
+    int "Coglet AEC reference delay (ms)"
+    default 0
+    range -10 20
+    depends on USE_DEVICE_AEC && BOARD_TYPE_BREAD_COMPACT_WIFI_CAM
+    help
+        Time offset between the speaker reference and the microphone, for the Coglet software
+        AEC reference. Each mic sample captured at time t is paired with the speaker sample
+        played at (t - delay). The reference must not arrive later than the echo, so keep
+        this at or below the real acoustic delay (normally 0..2 ms on Coglet).
+        Leave at 0 unless an Audio Debugger capture shows the echo leading the reference.
 
 config USE_SERVER_AEC
     bool "Enable Server-Side AEC (Unstable)"

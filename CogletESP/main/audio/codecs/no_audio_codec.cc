@@ -1,9 +1,14 @@
 #include "no_audio_codec.h"
+#include "software_aec_reference.h"
 
+#include <esp_attr.h>
+#include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <sdkconfig.h>
 #include <cmath>
 #include <cstring>
+#include <vector>
 
 #define TAG "NoAudioCodec"
 
@@ -540,6 +545,282 @@ int NoAudioCodecSimplexPdm::Read(int16_t* dest, int samples) {
             int32_t amplified = dest[i] * gain_factor;
             dest[i] = (amplified > INT16_MAX) ? INT16_MAX : (amplified < -INT16_MAX) ? -INT16_MAX : (int16_t)amplified;
         }
+    }
+    return samples;
+}
+
+// ============================================================================
+// Software AEC reference (digital loopback) for NoAudioCodecSimplex.
+//
+// The speaker TX DMA "on_sent" callback hands us each PCM block exactly as it
+// was clocked out to the amplifier (before the driver's auto-clear), and the
+// mic RX DMA "on_recv" callback hands us each microphone block. Both are
+// timestamped on esp_timer; SoftwareAecReference pairs every mic frame with
+// the speaker signal that was playing at the same instant. Read() then returns
+// interleaved [mic, reference] frames, which is the "MR" layout esp-sr AFE AEC
+// consumes. The legacy mono path above is untouched when this is not enabled.
+// ============================================================================
+
+namespace {
+void* AecRefAlloc(size_t bytes, bool isr_access) {
+    void* ptr = nullptr;
+#if CONFIG_I2S_ISR_IRAM_SAFE
+    // IRAM-safe ISRs may run with the flash/PSRAM cache disabled.
+    if (isr_access) {
+        return heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+#else
+    (void)isr_access;
+#endif
+#if CONFIG_SPIRAM
+    ptr = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#endif
+    if (ptr == nullptr) {
+        ptr = heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    return ptr;
+}
+
+void AecRefFree(void* ptr) {
+    heap_caps_free(ptr);
+}
+
+// Same DC blocking + scaling as NoAudioCodec::Read(), kept separate so the
+// legacy path stays byte-for-byte unchanged.
+struct MicConvertStats {
+    uint32_t raw_peak = 0;
+    uint64_t ac_abs_sum = 0;
+    uint32_t ac_peak = 0;
+    uint64_t pcm_abs_sum = 0;
+    uint32_t pcm_peak = 0;
+    int clipped = 0;
+};
+
+int16_t ConvertMicWord(int32_t raw_sample, MicConvertStats& st) {
+    constexpr int kMicPcmRightShift = 12;
+    constexpr int kDcTrackingShift = 12;  // alpha = 1 / 4096, ~0.6 Hz corner
+    static bool dc_initialized = false;
+    static int64_t dc_estimate = 0;
+
+    const uint32_t raw_abs = Magnitude32(raw_sample);
+    if (raw_abs > st.raw_peak) {
+        st.raw_peak = raw_abs;
+    }
+    if (!dc_initialized) {
+        dc_estimate = raw_sample;
+        dc_initialized = true;
+    }
+    dc_estimate += (static_cast<int64_t>(raw_sample) - dc_estimate) >> kDcTrackingShift;
+
+    int64_t centered64 = static_cast<int64_t>(raw_sample) - dc_estimate;
+    if (centered64 > INT32_MAX) {
+        centered64 = INT32_MAX;
+    } else if (centered64 < INT32_MIN) {
+        centered64 = INT32_MIN;
+    }
+    const int32_t centered = static_cast<int32_t>(centered64);
+    const uint32_t centered_abs = Magnitude32(centered);
+    st.ac_abs_sum += centered_abs;
+    if (centered_abs > st.ac_peak) {
+        st.ac_peak = centered_abs;
+    }
+
+    const int32_t value = centered >> kMicPcmRightShift;
+    const uint32_t value_abs = Magnitude32(value);
+    st.pcm_abs_sum += value_abs;
+    if (value_abs > st.pcm_peak) {
+        st.pcm_peak = value_abs;
+    }
+    if (value > INT16_MAX) {
+        ++st.clipped;
+        return INT16_MAX;
+    }
+    if (value < INT16_MIN) {
+        ++st.clipped;
+        return INT16_MIN;
+    }
+    return static_cast<int16_t>(value);
+}
+}  // namespace
+
+NoAudioCodecSimplex::~NoAudioCodecSimplex() {
+    if (aec_ref_ == nullptr) {
+        return;  // NoAudioCodec::~NoAudioCodec() handles the plain path.
+    }
+    // Stop the DMA ISRs before freeing what they write into. Delete the
+    // channels here and clear the handles so the base destructor skips them.
+    if (rx_handle_ != nullptr) {
+        i2s_channel_disable(rx_handle_);
+        i2s_del_channel(rx_handle_);
+        rx_handle_ = nullptr;
+    }
+    if (tx_handle_ != nullptr) {
+        i2s_channel_disable(tx_handle_);
+        i2s_del_channel(tx_handle_);
+        tx_handle_ = nullptr;
+    }
+    aec_ref_.reset();
+    if (aec_data_sem_ != nullptr) {
+        vSemaphoreDelete(aec_data_sem_);
+        aec_data_sem_ = nullptr;
+    }
+}
+
+bool NoAudioCodecSimplex::EnableSoftwareAecReference(int ref_delay_us) {
+    if (aec_ref_ != nullptr) {
+        return true;
+    }
+    if (tx_handle_ == nullptr || rx_handle_ == nullptr) {
+        ESP_LOGE(TAG, "[AEC-REF] I2S channels missing");
+        return false;
+    }
+
+    auto reference = std::make_unique<SoftwareAecReference>();
+    SoftwareAecReference::Config config;
+    config.mic_rate_hz = input_sample_rate_;
+    config.ref_rate_hz = output_sample_rate_;
+    config.ref_delay_us = ref_delay_us;
+    if (!reference->Init(config, AecRefAlloc, AecRefFree)) {
+        ESP_LOGE(TAG, "[AEC-REF] buffer allocation failed; AEC reference disabled");
+        return false;
+    }
+
+    aec_data_sem_ = xSemaphoreCreateBinary();
+    if (aec_data_sem_ == nullptr) {
+        ESP_LOGE(TAG, "[AEC-REF] semaphore allocation failed");
+        return false;
+    }
+
+    aec_rx_stride_ = g_standard_rx_stereo ? 2 : 1;
+    aec_rx_channel_ = g_standard_rx_stereo ? g_standard_rx_channel_index : 0;
+
+    // Publish the reference object before any callback can run. The channels
+    // are still disabled here (Start() enables them), so no ISR is active yet.
+    aec_ref_ = std::move(reference);
+
+    i2s_event_callbacks_t tx_callbacks = {};
+    tx_callbacks.on_sent = OnSpeakerBlockSent;
+    esp_err_t err = i2s_channel_register_event_callback(tx_handle_, &tx_callbacks, this);
+    if (err == ESP_OK) {
+        i2s_event_callbacks_t rx_callbacks = {};
+        rx_callbacks.on_recv = OnMicBlockReceived;
+        err = i2s_channel_register_event_callback(rx_handle_, &rx_callbacks, this);
+        if (err != ESP_OK) {
+            i2s_event_callbacks_t none = {};
+            i2s_channel_register_event_callback(tx_handle_, &none, nullptr);
+        }
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "[AEC-REF] callback registration failed: %s", esp_err_to_name(err));
+        aec_ref_.reset();
+        vSemaphoreDelete(aec_data_sem_);
+        aec_data_sem_ = nullptr;
+        return false;
+    }
+
+    input_channels_ = 2;      // interleaved [mic, reference]
+    input_reference_ = true;  // AfeAudioProcessor builds the "MR" format
+    ESP_LOGW(TAG,
+             "[AEC-REF] software loopback ENABLED: mic %d Hz (slot %d/%d), "
+             "speaker %d Hz -> reference resampled to mic rate, delay=%d us",
+             input_sample_rate_, aec_rx_channel_, aec_rx_stride_,
+             output_sample_rate_, ref_delay_us);
+    return true;
+}
+
+bool IRAM_ATTR NoAudioCodecSimplex::OnSpeakerBlockSent(i2s_chan_handle_t, i2s_event_data_t* event,
+                                                       void* user_ctx) {
+    auto* self = static_cast<NoAudioCodecSimplex*>(user_ctx);
+    const int64_t now_us = esp_timer_get_time();
+    if (event->dma_buf != nullptr) {
+        // TX is 32-bit mono: one word per frame.
+        self->aec_ref_->PushRefFromIsr(static_cast<const int32_t*>(event->dma_buf),
+                                       event->size / sizeof(int32_t), now_us);
+    }
+    BaseType_t woken = pdFALSE;
+    xSemaphoreGiveFromISR(self->aec_data_sem_, &woken);
+    return woken == pdTRUE;
+}
+
+bool IRAM_ATTR NoAudioCodecSimplex::OnMicBlockReceived(i2s_chan_handle_t, i2s_event_data_t* event,
+                                                       void* user_ctx) {
+    auto* self = static_cast<NoAudioCodecSimplex*>(user_ctx);
+    const int64_t now_us = esp_timer_get_time();
+    if (event->dma_buf != nullptr) {
+        const size_t words = event->size / sizeof(int32_t);
+        self->aec_ref_->PushMicFromIsr(static_cast<const int32_t*>(event->dma_buf),
+                                       words / self->aec_rx_stride_, self->aec_rx_stride_,
+                                       self->aec_rx_channel_, now_us);
+    }
+    BaseType_t woken = pdFALSE;
+    xSemaphoreGiveFromISR(self->aec_data_sem_, &woken);
+    return woken == pdTRUE;
+}
+
+int NoAudioCodecSimplex::Read(int16_t* dest, int samples) {
+    if (aec_ref_ == nullptr) {
+        return NoAudioCodec::Read(dest, samples);
+    }
+    return ReadWithSoftwareReference(dest, samples);
+}
+
+int NoAudioCodecSimplex::ReadWithSoftwareReference(int16_t* dest, int samples) {
+    if (dest == nullptr || samples < 2) {
+        return 0;
+    }
+    // AudioService asks for frames * input_channels() interleaved samples.
+    const int frames = samples / 2;
+    std::vector<int32_t> mic(frames);
+    std::vector<int16_t> ref(frames);
+
+    // Both DMA ISRs give the semaphore (every 10-15 ms), so this wakes as soon
+    // as either new mic data or the matching speaker block has arrived.
+    int waits_without_data = 0;
+    while (true) {
+        const auto result = aec_ref_->Pull(frames, mic.data(), ref.data(), esp_timer_get_time());
+        if (result == SoftwareAecReference::PullResult::kOk) {
+            break;
+        }
+        if (xSemaphoreTake(aec_data_sem_, pdMS_TO_TICKS(200)) != pdTRUE) {
+            if (++waits_without_data == 5) {
+                ESP_LOGE(TAG, "[AEC-REF] no I2S DMA activity for 1 s (channels disabled?)");
+            }
+        } else {
+            waits_without_data = 0;
+        }
+    }
+
+    MicConvertStats st;
+    for (int i = 0; i < frames; ++i) {
+        dest[i * 2] = ConvertMicWord(mic[i], st);
+        dest[i * 2 + 1] = ref[i];
+    }
+
+    // One diagnostic line per second (mic levels + reference alignment).
+    static int64_t last_log_us = 0;
+    const int64_t now_us = esp_timer_get_time();
+    if (now_us - last_log_us >= 1000000) {
+        last_log_us = now_us;
+        const auto aec = aec_ref_->GetStats();
+        ESP_LOGW(TAG,
+                 "[MIC] mode=aec-ref raw=%u acAvg=%u acPeak=%u pcmAvg=%u pcmPeak=%u clip=%d/%d | "
+                 "[AEC-REF] refPeak=%u offset=%dus missing=%u late=%u micOvr=%u refOvr=%u "
+                 "resync=%u/%u torn=%u",
+                 static_cast<unsigned>(st.raw_peak),
+                 static_cast<unsigned>(st.ac_abs_sum / frames),
+                 static_cast<unsigned>(st.ac_peak),
+                 static_cast<unsigned>(st.pcm_abs_sum / frames),
+                 static_cast<unsigned>(st.pcm_peak),
+                 st.clipped, frames,
+                 static_cast<unsigned>(aec.ref_peak),
+                 static_cast<int>(aec.last_offset_us),
+                 static_cast<unsigned>(aec.ref_missing_frames),
+                 static_cast<unsigned>(aec.ref_late_frames),
+                 static_cast<unsigned>(aec.mic_overruns),
+                 static_cast<unsigned>(aec.ref_overruns),
+                 static_cast<unsigned>(aec.mic_resyncs),
+                 static_cast<unsigned>(aec.ref_resyncs),
+                 static_cast<unsigned>(aec.mic_torn_blocks));
     }
     return samples;
 }

@@ -735,8 +735,13 @@ bool Application::StartAutoAwakeSession(const char* reason) {
         SetDeviceState(kDeviceStateIdle);
         return false;
     }
-    SetListeningMode(kListeningModeAutoStop);  // No AEC/realtime; reuse native VAD.
-    ESP_LOGI(AUTO_AWAKE_TAG, "%s_LISTENING: mode=auto", reason);
+    // Without AEC the boot session reuses native VAD (auto-stop). With device
+    // AEC it uses realtime mode like every other wake path, so the first
+    // conversation after boot can be interrupted too.
+    const ListeningMode mode = aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime;
+    SetListeningMode(mode);
+    ESP_LOGI(AUTO_AWAKE_TAG, "%s_LISTENING: mode=%s", reason,
+             mode == kListeningModeRealtime ? "realtime" : "auto");
     return true;
 }
 

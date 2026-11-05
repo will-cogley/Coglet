@@ -339,6 +339,20 @@ public:
             AUDIO_I2S_MIC_GPIO_WS,
             AUDIO_I2S_MIC_GPIO_DIN
         );
+#if CONFIG_USE_DEVICE_AEC
+        // Coglet has no hardware AEC reference path (SPH0645 + MAX98357A on
+        // separate I2S ports), so take the reference digitally from the
+        // speaker DMA. Runs once, before AudioService starts the codec.
+        static const bool aec_reference_ready = [] {
+            const bool ok = audio_codec.EnableSoftwareAecReference(
+                CONFIG_COGLET_AEC_REF_DELAY_MS * 1000);
+            if (!ok) {
+                ESP_LOGE(TAG, "Software AEC reference unavailable: running without echo cancellation");
+            }
+            return ok;
+        }();
+        (void)aec_reference_ready;
+#endif
         return &audio_codec;
     }
 

@@ -57,8 +57,14 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
     afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
 
 #ifdef CONFIG_USE_DEVICE_AEC
-    afe_config->aec_init = true;
-    afe_config->vad_init = false;
+    // AEC needs a reference channel. If the codec could not provide one
+    // (e.g. Coglet software reference failed to allocate), fall back to the
+    // normal VAD configuration instead of running AEC on a missing "R".
+    afe_config->aec_init = ref_num > 0;
+    afe_config->vad_init = ref_num == 0;
+    if (ref_num == 0) {
+        ESP_LOGE(TAG, "Device AEC enabled but codec has no reference channel; AEC disabled");
+    }
 #else
     afe_config->aec_init = false;
     afe_config->vad_init = true;
