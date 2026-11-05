@@ -1,29 +1,45 @@
-
-        # ==========================================================
-        # Y -> neck pitch
-        # ==========================================================
-# Grove Vision AI V2 -> eyes-only visual follower
-# MicroPython / RP2040 / Coglet PCB V2.0
+# Grove Vision AI V2 -> visual follower (camera inside the eye)
+# MicroPython / RP2040 / Coglet PCB V2.0+
 #
 # PCB wiring:
 #   RP2040 GPIO0 / UART0 TX -> Grove Vision AI V2 RX
 #   RP2040 GPIO1 / UART0 RX <- Grove Vision AI V2 TX
-#
-# Grove Vision AI V2 default UART:
 #   921600 baud, 8N1
 #
-# V2 visual-follow mapping:
-#   X -> EYR / EYL  (right + left eyeballs)
-#   Y -> PIT        (neck pitch)
+# Axes owned by Facetrack:
+#   X -> EYL + EYR (eyeballs), with base YAW taking over when the eyes reach
+#        their soft limit (printed parts limit eye travel)
+#   Y -> PIT (neck pitch)
 #
-# Facetrack intentionally owns ONLY these three servos.
-# It does NOT control YAW/base, neck left-right, eyelid, ears, or mouth.
+# ---------------------------------------------------------------------------
+# Why this version is different (R18)
 #
-# SSCMA detection box format observed in the existing project:
-#   [x, y, w, h, score, target]
-# where x/y are treated as target-center coordinates in the 240x240 image.
+# The camera sits INSIDE the eye. The image therefore only tells us where the
+# face is relative to where the eye is pointing *at the moment the frame was
+# captured*. Mapping "pixel error -> absolute eye angle" (R14..R17) fights
+# itself: as soon as the eye turns toward the face, the error shrinks and the
+# eye is pulled back to centre. That caused the slow, never-quite-centred,
+# shaky behaviour; heavy filtering then made it even slower.
+#
+# R18 does what the geometry says:
+#   face_direction = eye_angle_at_capture + pixel_error * DEG_PER_PX
+# That is the face direction in the head/body frame. It does not depend on
+# where the eye is now, so the loop no longer fights itself. Then:
+#   1. a One-Euro filter on that direction (smooth when still, fast when moving)
+#   2. velocity prediction between frames (no 30 Hz stair-steps)
+#   3. command the eyes directly; Servo.update() keeps motion smooth
+#   4. if the wanted direction is beyond the eye soft limit, the base turns
+#      (speed proportional to the overflow) so the eyes never sit hard-over
+# Capture time = arrival time - SSCMA perf (pre+infer+post) - exposure.
+# Continuous inference (AT+INVOKE=-1,0,1) removes the per-frame round trip;
+# falls back to single-shot automatically if the module refuses it.
+# ---------------------------------------------------------------------------
+#
+# SSCMA detection box format: [x, y, w, h, score, target], x/y = box centre in
+# the 240x240 image.
 
 from machine import Pin, UART
+import math
 import time
 
 try:
@@ -46,131 +62,115 @@ FRAME_HEIGHT = 240
 FRAME_CENTER_X = FRAME_WIDTH / 2.0
 FRAME_CENTER_Y = FRAME_HEIGHT / 2.0
 
-# Both eyes currently use 90 deg as their neutral command.
+# ---------------------------------------------------------------- geometry
+# Servo degrees the camera has to turn to move the face by ONE pixel in the
+# image (depends on the lens field of view and the eye/neck linkage).
+#
+# How to tune (only thing that really needs tuning):
+#   - look at Coglet, then step sideways quickly
+#   - eyes overshoot and swing back        -> value too HIGH, lower it
+#   - eyes need 2-3 visible steps to land  -> value too LOW, raise it
+# The tracker stays stable from about half to double the correct value.
+X_SERVO_DEG_PER_PX = 0.22
+Y_SERVO_DEG_PER_PX = 0.22
+
+# Both eyes use 90 deg as their neutral command.
 LEFT_EYE_CENTER = 90.0
 RIGHT_EYE_CENTER = 90.0
 
-# Current eye visual-follow range.
-# animation.py hard limit is currently 5..150 deg;
-# keep 2 deg of software margin here.
+# Eye soft limits (printed parts). Beyond these the base takes over.
 LEFT_EYE_MIN = 60.0
 LEFT_EYE_MAX = 130.0
 RIGHT_EYE_MIN = 60.0
 RIGHT_EYE_MAX = 130.0
 
-# The original V1 animation moved both eye servos with the same numeric angle.
-# Therefore both directions start at +1.
-#
-# If the eyes move opposite to the detected target, change BOTH to -1.
-# If only one eye is reversed, change only that eye.
+# +1: a larger servo angle turns the camera toward image +X (right).
+# If the eyes run AWAY from the face, flip BOTH to -1.
 LEFT_EYE_DIRECTION = 1.0
 RIGHT_EYE_DIRECTION = 1.0
 
-# ==============================================================
-# Neck pitch visual-follow tuning
-#
-# Current animation.py PIT hard limit in this project is 1..80 deg.
-# Start with a conservative visual-follow range and tune mechanically.
-#
-# IMPORTANT:
-# If the head pitches the wrong way when the target moves vertically,
-# change PITCH_DIRECTION from +1.0 to -1.0.
-# ==============================================================
+# Neck pitch (PIT). animation.py hard limit is 1..80 deg.
+# +1: a larger PIT angle turns the camera toward image +Y (down).
 PITCH_CENTER = 50.0
 PITCH_MIN = 3.0
 PITCH_MAX = 78.0
 PITCH_DIRECTION = 1.0
 
-# ==============================================================
-# Base/body yaw handoff tuning
-#
-# animation.py YAW hard/software limit is 10..170 deg.
-# R16 keeps a small safety margin at 15..165 deg.
-#
-# The base moves incrementally only while the requested eye position
-# is beyond the eye visual soft limit. Once the eyes are back inside
-# their range, the base HOLDS its new angle.
-# ==============================================================
+# Faster neck while tracking (animation.py default PIT accel is 400 deg/s^2,
+# which made the head feel sluggish). Restored when pitch tracking stops.
+PITCH_TRACK_MAX_SPEED = 600.0
+PITCH_TRACK_MAX_ACCEL = 900.0
+
+# ----------------------------------------------------------- base handoff
+# animation.py YAW range is 30..150 deg.
 BASE_YAW_CENTER = 90.0
 BASE_YAW_MIN = 30.0
 BASE_YAW_MAX = 150.0
+# +1: a larger YAW angle turns the camera toward image +X (same as the eyes).
 BASE_YAW_DIRECTION = 1.0
+# Eye-servo degrees equivalent to one base-servo degree (camera turn).
+BASE_TO_GAZE_RATIO = 1.0
+# The eyes may use their full soft range briefly, but should not rest near
+# it: the base turns whenever the wanted gaze is more than COMFORT_MARGIN
+# inside the soft limit, until the eyes are back in the comfortable zone.
+# Base speed is proportional to the excess (deg/s per deg), capped.
+BASE_COMFORT_MARGIN_DEG = 10.0
+BASE_HANDOFF_DEADBAND_DEG = 1.0
+BASE_HANDOFF_GAIN = 2.5
+BASE_MAX_SPEED_DEG_S = 45.0
 
-# Require this much eye-command overflow before handing motion to base.
-BASE_HANDOFF_HYSTERESIS_DEG = 3.0
+# ------------------------------------------------------------- smoothing
+# One-Euro filter on the face direction (degrees).
+#   MIN_CUTOFF: lower = calmer when the face is still (more lag)
+#   BETA:       higher = less lag when the face moves fast
+X_MIN_CUTOFF_HZ = 1.2
+X_BETA = 0.04
+Y_MIN_CUTOFF_HZ = 0.9
+Y_BETA = 0.03
+DERIVATIVE_CUTOFF_HZ = 1.0
 
-# Maximum incremental base command change per control update.
-BASE_MAX_COMMAND_STEP_DEG = 1.0
+# Predict the face motion between frames (fraction of the measured velocity
+# applied for the time since capture). 0 disables prediction.
+PREDICTION_GAIN = 0.8
+PREDICTION_MAX_DEG = 6.0
+# Below this face speed (deg/s) there is no prediction, so detector noise on
+# a still face is not turned into eye twitching.
+PREDICTION_MIN_SPEED_DEG_S = 8.0
 
-# Pixels around image center that produce no eye motion.
-X_DEADZONE_PX = 8.0
+# Fraction of the measured pixel error applied per frame. 1.0 = jump straight
+# to the face (fastest, but overshoots if DEG_PER_PX is set too high);
+# 0.75 keeps a safety margin and still lands within 2-3 frames.
+CORRECTION_GAIN = 0.75
 
-# Horizontal proportional gain.
-EYE_GAIN_DEG_PER_PX = 0.75
+# Ignore pixel errors this close to the image centre (detector noise).
+X_DEADZONE_PX = 3.0
+Y_DEADZONE_PX = 4.0
 
-# ==============================================================
-# R14 anti-jitter / anti-shake tuning
-#
-# Why the old version can still shake:
-#   - dead-zone only exists around CAMERA CENTER
-#   - EMA smooths x, but still follows every tiny detector fluctuation
-#   - slew limiting slows the chasing, but does not stop the chasing
-#
-# R14 adds three layers:
-#   1) 5-frame median filter: rejects one-frame box jumps
-#   2) adaptive EMA: responsive while target moves, heavy smoothing when stable
-#   3) command hysteresis: tiny desired-angle changes are ignored completely
-# ==============================================================
+# --------------------------------------------------------------- timing
+# Continuous inference stream (recommended). Falls back to single-shot.
+CONTINUOUS_INVOKE = True
+# Sensor exposure/readout before preprocessing starts (not in SSCMA perf).
+SENSOR_LATENCY_MS = 12
+# Used when a reply carries no perf field.
+DEFAULT_PIPELINE_MS = 40
+# Restart the stream if no frame arrives for this long.
+STREAM_STALL_MS = 1500
+# Single-shot mode only: pause between frames.
+INVOKE_GAP_MS = 5
 
-# Number of recent detector x samples used by the median filter.
-X_MEDIAN_WINDOW = 5
-
-# Adaptive EMA:
-# small detector movement -> strong smoothing
-# large detector movement -> fast response
-TARGET_X_ALPHA_STABLE = 0.10
-TARGET_X_ALPHA_MOVING = 0.50
-TARGET_X_MOVING_THRESHOLD_PX = 14.0
-
-# If the desired eye command changes less than this, do not update it.
-# This is the most important "settle down and stay still" threshold.
-EYE_COMMAND_HYSTERESIS_DEG = 3.0
-
-# ==============================================================
-# R15 Y-axis anti-jitter / neck-pitch tuning
-#
-# Neck is heavier than the eyeballs, so Y is deliberately more stable
-# and a little slower than X.
-# ==============================================================
-Y_DEADZONE_PX = 12.0
-PITCH_GAIN_DEG_PER_PX = 0.55
-
-Y_MEDIAN_WINDOW = 5
-TARGET_Y_ALPHA_STABLE = 0.08
-TARGET_Y_ALPHA_MOVING = 0.35
-TARGET_Y_MOVING_THRESHOLD_PX = 16.0
-
-PITCH_COMMAND_HYSTERESIS_DEG = 4.0
-PITCH_MAX_COMMAND_STEP_DEG = 1.5
-
-# Limit how much the commanded eye angle can change per control update.
-# This is separate from Servo.update(dt), which still performs smooth motion.
-MAX_COMMAND_STEP_DEG = 2.5
-
-# Eye-control update interval. Inference may arrive at another rate.
-CONTROL_INTERVAL_MS = 25
-
-# If target disappears for this long, slowly return both eyes to center.
+# If the face disappears for this long, glide back to centre.
 TARGET_LOST_MS = 650
+RETURN_SPEED_DEG_S = 40.0
 
-# After startup diagnostics, invoke inference continuously.
-INVOKE_GAP_MS = 25
+# Servo position history (for capture-time lookup).
+HISTORY_INTERVAL_MS = 4
+HISTORY_LENGTH = 120          # ~480 ms
 
-# Sparse serial logging to avoid slowing the control loop.
+# Logging
 FRAME_LOG_EVERY = 30
 CONTROL_LOG_EVERY_MS = 1000
 
-# Do not override special animations/calibration-like modes yet.
+# Do not override special animations/calibration-like modes.
 ACTIVE_STATES = (
     "speaking",
     "listening",
@@ -207,24 +207,57 @@ def move_towards(current, target, maximum_delta):
     return current
 
 
+class OneEuroFilter:
+    """One-Euro filter (Casiez et al.): adaptive low-pass, x in degrees."""
+
+    def __init__(self, min_cutoff, beta, d_cutoff):
+        self.min_cutoff = min_cutoff
+        self.beta = beta
+        self.d_cutoff = d_cutoff
+        self.ready = False
+        self.x = 0.0
+        self.dx = 0.0
+        self.t = 0.0
+
+    @staticmethod
+    def _alpha(dt, cutoff):
+        tau = 1.0 / (2.0 * math.pi * cutoff)
+        return 1.0 / (1.0 + tau / dt)
+
+    def reset(self, x, t):
+        self.ready = True
+        self.x = x
+        self.dx = 0.0
+        self.t = t
+
+    def update(self, x, t):
+        if not self.ready:
+            self.reset(x, t)
+            return self.x
+        dt = t - self.t
+        if dt <= 0.0005:
+            dt = 0.0005
+        raw_dx = (x - self.x) / dt
+        a_d = self._alpha(dt, self.d_cutoff)
+        self.dx = a_d * raw_dx + (1.0 - a_d) * self.dx
+        cutoff = self.min_cutoff + self.beta * abs(self.dx)
+        a = self._alpha(dt, cutoff)
+        self.x = a * x + (1.0 - a) * self.x
+        self.t = t
+        return self.x
+
+
 class GroveVisionAI:
     """
-    Minimal non-blocking SSCMA UART driver.
+    Non-blocking SSCMA UART driver.
 
-    Startup:
-      AT+ID?
-      AT+VER?
-      AT+STAT?
-      AT+MODEL?
-      AT+SENSOR?
+    Startup queries: AT+ID? AT+VER? AT+STAT? AT+MODEL? AT+SENSOR?
+    Runtime: AT+INVOKE=-1,0,1 (continuous) or AT+INVOKE=1,0,1 (single-shot).
 
-    Runtime:
-      AT+INVOKE=1,0,1
-
-    The driver stores:
-      frame_id
-      last_boxes
-      last_frame_at
+    Exposes for the follower:
+      frame_id          increments on every inference result
+      last_boxes        boxes of the newest result
+      last_capture_ms   estimated capture time of the newest result
     """
 
     def __init__(self):
@@ -248,6 +281,9 @@ class GroveVisionAI:
         self.invoke_pending = False
         self.invoke_since = 0
 
+        self.continuous = CONTINUOUS_INVOKE
+        self.streaming = False
+
         now = time.ticks_ms()
         self.next_action_at = time.ticks_add(now, 1800)
         self.last_no_rx_warning = now
@@ -257,12 +293,15 @@ class GroveVisionAI:
         self.frame_id = 0
         self.last_boxes = []
         self.last_frame_at = now
+        self.last_capture_ms = now
+        self.last_perf = None
 
-        # Logical Grove Vision run control.  There is no dedicated hardware
-        # power-enable pin in this RP2040 firmware, so OFF means:
-        #   - keep UART alive/drain pending replies
-        #   - stop issuing new startup/inference commands
-        #   - do not let Vision write servo targets
+        # FPS / latency statistics
+        self.stat_frames = 0
+        self.stat_pipeline_sum = 0
+        self.stat_since = now
+
+        # Logical run control (no hardware enable pin): OFF stops inference.
         self.run_enabled = True
 
         print("")
@@ -270,7 +309,7 @@ class GroveVisionAI:
         print("UART0 TX=GPIO0 -> Vision RX")
         print("UART0 RX=GPIO1 <- Vision TX")
         print("921600 baud, 8N1")
-        print("V2 mode: X->EYES, Y->PITCH only; YAW/base not controlled")
+        print("mode: {}".format("continuous" if self.continuous else "single-shot"))
         print("========================================")
 
     def _open_uart(self):
@@ -299,65 +338,49 @@ class GroveVisionAI:
     @staticmethod
     def _expected_name(command):
         """
-        Return the SSCMA response name for an AT command.
-
-        Important:
-        Query responses from Grove Vision AI V2 preserve the '?' suffix:
-            AT+ID?      -> name == "ID?"
-            AT+VER?     -> name == "VER?"
-            AT+STAT?    -> name == "STAT?"
-            AT+MODEL?   -> name == "MODEL?"
-            AT+SENSOR?  -> name == "SENSOR?"
-
-        Set/invoke commands still match by the name before '=':
-            AT+INVOKE=1,0,1 -> name == "INVOKE"
+        SSCMA response name for an AT command.
+          AT+ID?          -> "ID?"   (query names keep the '?')
+          AT+INVOKE=...   -> "INVOKE"
+          AT+BREAK        -> "BREAK"
         """
         body = command[3:] if command.startswith("AT+") else command
-
         if "=" in body:
             return body.split("=", 1)[0]
-
         return body
 
     def _send(self, command):
         self.uart.write((command + "\r").encode())
-
         self.waiting_command = command
         self.waiting_since = time.ticks_ms()
-
-        if not command.startswith("AT+INVOKE"):
+        if not command.startswith("AT+INVOKE=1,"):
             print("[VISION TX]", command)
 
     def _read_uart(self):
         if not self.uart.any():
             return
-
         chunk = self.uart.read()
         if not chunk:
             return
-
+        # Arrival time of this chunk; used for the capture-time estimate.
+        rx_ms = time.ticks_ms()
         self.online = True
         self.rx_buffer += chunk
-
         if len(self.rx_buffer) > self.max_buffer:
             self.rx_buffer = self.rx_buffer[-self.max_buffer:]
 
         while b"\n" in self.rx_buffer:
             line, self.rx_buffer = self.rx_buffer.split(b"\n", 1)
             line = line.strip()
-
             if line:
-                self._handle_line(line)
+                self._handle_line(line, rx_ms)
 
-    def _handle_line(self, line):
+    def _handle_line(self, line, rx_ms):
         try:
             text = line.decode("utf-8")
         except UnicodeError:
             return
-
         if not text.startswith("{"):
             return
-
         try:
             message = json.loads(text)
         except Exception:
@@ -371,128 +394,145 @@ class GroveVisionAI:
         if response_type == 0:
             self._handle_operation(name, code, data)
         elif response_type == 1:
-            self._handle_event(name, code, data)
+            self._handle_event(name, code, data, rx_ms, len(line))
 
     def _handle_operation(self, name, code, data):
-        if name != "INVOKE":
-            print(
-                "[VISION RX] {} code={} data={}".format(
-                    name,
-                    code,
-                    data,
-                )
-            )
+        # Single-shot mode gets an INVOKE reply every frame: don't log those.
+        single_shot_reply = (name == "INVOKE" and self.waiting_command is not None
+                             and self.waiting_command.startswith("AT+INVOKE=1,"))
+        if not single_shot_reply:
+            print("[VISION RX] {} code={} data={}".format(name, code, data))
 
         if self.waiting_command is None:
             return
-
-        expected = self._expected_name(self.waiting_command)
-
-        if name != expected:
+        if name != self._expected_name(self.waiting_command):
             return
 
         command = self.waiting_command
         self.waiting_command = None
+        now = time.ticks_ms()
 
-        if not command.startswith("AT+INVOKE"):
-            print("[VISION OK]", command)
+        if command.startswith("AT+INVOKE=-1"):
+            if code == 0:
+                self.streaming = True
+                self.last_frame_at = now
+                print("[VISION] continuous inference stream STARTED")
+            else:
+                # Module refused continuous mode: use single-shot from now on.
+                self.continuous = False
+                self.streaming = False
+                self.next_action_at = time.ticks_add(now, 200)
+                print("[VISION] continuous mode refused (code={}), using single-shot".format(code))
+            return
 
         if command.startswith("AT+INVOKE"):
             if code == 0:
                 self.invoke_pending = True
-                self.invoke_since = time.ticks_ms()
+                self.invoke_since = now
             else:
                 self.invoke_pending = False
-                self.next_action_at = time.ticks_add(
-                    time.ticks_ms(),
-                    500,
-                )
+                self.next_action_at = time.ticks_add(now, 500)
             return
 
+        if command == "AT+BREAK":
+            self.streaming = False
+            self.next_action_at = time.ticks_add(now, 50)
+            return
+
+        print("[VISION OK]", command)
         if self.query_index < len(self.boot_queries):
             self.query_index += 1
+        self.next_action_at = time.ticks_add(now, 120)
 
-        self.next_action_at = time.ticks_add(
-            time.ticks_ms(),
-            120,
-        )
-
-    def _handle_event(self, name, code, data):
+    def _handle_event(self, name, code, data, rx_ms, line_bytes):
         if name != "INVOKE":
             return
 
         self.invoke_pending = False
         self.frames += 1
-        self.frame_id += 1
-        self.last_frame_at = time.ticks_ms()
-        self.next_action_at = time.ticks_add(
-            self.last_frame_at,
-            INVOKE_GAP_MS,
-        )
+        self.last_frame_at = rx_ms
+        if not self.streaming:
+            self.next_action_at = time.ticks_add(rx_ms, INVOKE_GAP_MS)
 
-        if code != 0 or not isinstance(data, dict):
+        if not self.run_enabled:
+            # A frame already in flight when Facetrack was switched off.
             self.last_boxes = []
             return
 
-        boxes = data.get("boxes", [])
-        self.last_boxes = boxes if isinstance(boxes, list) else []
+        pipeline_ms = DEFAULT_PIPELINE_MS
+        perf = data.get("perf") if isinstance(data, dict) else None
+        if isinstance(perf, (list, tuple)) and len(perf) >= 3:
+            try:
+                pipeline_ms = int(perf[0]) + int(perf[1]) + int(perf[2])
+                self.last_perf = perf
+            except (TypeError, ValueError):
+                pass
+        # UART transfer of this line (10 bits per byte).
+        transfer_ms = (line_bytes * 10 * 1000) // VISION_BAUDRATE
+        self.last_capture_ms = time.ticks_add(
+            rx_ms, -(pipeline_ms + transfer_ms + SENSOR_LATENCY_MS))
+
+        self.stat_frames += 1
+        self.stat_pipeline_sum += pipeline_ms + transfer_ms + SENSOR_LATENCY_MS
+
+        if code != 0 or not isinstance(data, dict):
+            self.last_boxes = []
+        else:
+            boxes = data.get("boxes", [])
+            self.last_boxes = boxes if isinstance(boxes, list) else []
+        # Publish the frame only after boxes and capture time are consistent.
+        self.frame_id += 1
 
         if self.frames % FRAME_LOG_EVERY != 0:
             return
-
         best = self.get_best_box()
-
         if best is None:
             print("[VISION FRAME {}] no target".format(self.frames))
-            return
-
-        print(
-            "[VISION FRAME {}] target={} score={} x={} y={}".format(
-                self.frames,
-                best[5],
-                best[4],
-                best[0],
-                best[1],
-            )
-        )
+        else:
+            print("[VISION FRAME {}] target={} score={} x={} y={}".format(
+                self.frames, best[5], best[4], best[0], best[1]))
 
     def get_best_box(self):
         best = None
-
         for box in self.last_boxes:
             if not isinstance(box, (list, tuple)):
                 continue
-
             if len(box) < 6:
                 continue
-
             if best is None or box[4] > best[4]:
                 best = box
-
         return best
+
+    def take_stats(self, now):
+        """Return (fps, average latency ms) since the previous call."""
+        elapsed = time.ticks_diff(now, self.stat_since)
+        if elapsed <= 0:
+            return 0.0, 0.0
+        fps = self.stat_frames * 1000.0 / elapsed
+        latency = (self.stat_pipeline_sum / self.stat_frames) if self.stat_frames else 0.0
+        self.stat_frames = 0
+        self.stat_pipeline_sum = 0
+        self.stat_since = now
+        return fps, latency
 
     def set_enabled(self, enabled, now=None):
         enabled = bool(enabled)
-
         if now is None:
             now = time.ticks_ms()
-
         if enabled == self.run_enabled:
             return
-
         self.run_enabled = enabled
         self.last_boxes = []
 
         if enabled:
-            # Resume immediately.  If startup queries were never completed,
-            # update() continues from query_index; otherwise inference resumes.
             self.next_action_at = now
             print("[VISION] ENABLED: startup/inference requests resumed")
         else:
-            # Do not tear down UART or power.  Any already-sent command/event
-            # may still arrive and is drained by update(), but no new command
-            # is issued until the switch is turned back ON.
-            print("[VISION] DISABLED: no new AT queries / AT+INVOKE requests")
+            if self.streaming:
+                # Stop the stream; frames already in flight are drained/ignored.
+                self._send("AT+BREAK")
+                self.streaming = False
+            print("[VISION] DISABLED: inference stopped")
 
     def update(self, now=None):
         if now is None:
@@ -502,58 +542,45 @@ class GroveVisionAI:
 
         # Recover from a lost command response.
         if self.waiting_command is not None:
-            if (
-                time.ticks_diff(
-                    now,
-                    self.waiting_since,
-                )
-                > 1800
-            ):
+            if time.ticks_diff(now, self.waiting_since) > 1800:
                 print("[VISION TIMEOUT]", self.waiting_command)
+                if self.waiting_command.startswith("AT+INVOKE=-1"):
+                    self.continuous = False
+                    print("[VISION] no reply to continuous INVOKE, using single-shot")
                 self.waiting_command = None
+                self.streaming = False
                 self.next_action_at = time.ticks_add(now, 350)
-
             return
 
-        # INVOKE returns an operation response followed by an event.
+        if self.streaming:
+            if time.ticks_diff(now, self.last_frame_at) > STREAM_STALL_MS:
+                print("[VISION] stream stalled, restarting")
+                self._send("AT+BREAK")
+            return
+
+        # Single-shot: INVOKE returns an operation response, then an event.
         if self.invoke_pending:
-            if (
-                time.ticks_diff(
-                    now,
-                    self.invoke_since,
-                )
-                > 3000
-            ):
+            if time.ticks_diff(now, self.invoke_since) > 3000:
                 print("[VISION TIMEOUT] INVOKE event")
                 self.invoke_pending = False
                 self.next_action_at = time.ticks_add(now, 500)
-
             return
 
-        # OFF is a logical pause: finish/drain anything already in flight,
-        # then stop generating new Vision traffic.
         if not self.run_enabled:
             return
-
         if time.ticks_diff(now, self.next_action_at) < 0:
             return
 
         if self.query_index < len(self.boot_queries):
-            self._send(
-                self.boot_queries[self.query_index]
-            )
+            self._send(self.boot_queries[self.query_index])
             return
 
-        self._send("AT+INVOKE=1,0,1")
+        if self.continuous:
+            self._send("AT+INVOKE=-1,0,1")
+        else:
+            self._send("AT+INVOKE=1,0,1")
 
-        if (
-            not self.online
-            and time.ticks_diff(
-                now,
-                self.last_no_rx_warning,
-            )
-            > 5000
-        ):
+        if not self.online and time.ticks_diff(now, self.last_no_rx_warning) > 5000:
             print(
                 "[VISION WARN] no UART reply: check power/GND, "
                 "Vision TX->GPIO1, Vision RX<-GPIO0"
@@ -563,13 +590,10 @@ class GroveVisionAI:
 
 class EyeFollower:
     """
-    V2 visual follower.
+    Visual follower for a camera mounted inside the eye.
 
-    X image error -> EYL + EYR
-    Y image error -> PIT neck pitch
-
-    Facetrack deliberately owns only these three axes.  YAW/base is left
-    entirely to XiaoZhi animations / other firmware behavior.
+    X: face direction -> EYL + EYR, base YAW takes over beyond the eye limit
+    Y: face direction -> PIT
 
     The class name stays EyeFollower for main.py compatibility.
     """
@@ -584,501 +608,311 @@ class EyeFollower:
         self.last_target_at = now
         self.last_control_at = now
         self.last_log_at = now
+        self.last_history_at = now
 
-        self.raw_x = FRAME_CENTER_X
-        self.median_x = FRAME_CENTER_X
-        self.filtered_x = FRAME_CENTER_X
-
-        self.raw_y = FRAME_CENTER_Y
-        self.median_y = FRAME_CENTER_Y
-        self.filtered_y = FRAME_CENTER_Y
-
-        self.filter_ready = False
         self.has_target = False
+        self.target_capture_ms = now
 
-        # Small rolling histories for median filtering.
-        self.x_history = []
-        self.y_history = []
+        self.filter_x = OneEuroFilter(X_MIN_CUTOFF_HZ, X_BETA, DERIVATIVE_CUTOFF_HZ)
+        self.filter_y = OneEuroFilter(Y_MIN_CUTOFF_HZ, Y_BETA, DERIVATIVE_CUTOFF_HZ)
 
-        self.left_command = LEFT_EYE_CENTER
-        self.right_command = RIGHT_EYE_CENTER
-        self.pitch_command = PITCH_CENTER
-        # Legacy base variables are kept only for compatibility with older
-        # tuning code/log readers; V2 Facetrack no longer writes YAW.
+        # Face direction estimates (degrees, image-axis sign convention):
+        #   x: in the head frame (eye gaze offset + base offset)
+        #   y: in the body frame (pitch offset)
+        self.face_x = 0.0
+        self.face_y = 0.0
+        self.raw_err_x = 0.0
+        self.raw_err_y = 0.0
+
+        # Current commands as offsets from centre (image-axis sign convention)
+        self.gaze_cmd = 0.0
+        self.pitch_cmd = 0.0
         self.base_command = BASE_YAW_CENTER
         self.base_handoff_active = False
         self.tracking_enabled_prev = True
+        self.pitch_tuning_applied = False
+        self.pitch_default_speed = servos["PIT"].max_speed
+        self.pitch_default_accel = servos["PIT"].max_accel
+
+        # Ring buffer of (t_ms, gaze_offset, pitch_offset, base_offset)
+        self.history = [None] * HISTORY_LENGTH
+        self.history_index = 0
+        self.history_count = 0
+        self._record_history(now)
 
         print("")
-        print("========== Visual follower R17 =============")
-        print("EYL center:", LEFT_EYE_CENTER)
-        print("EYR center:", RIGHT_EYE_CENTER)
-        print(
-            "eye range L={}..{} R={}..{}".format(
-                LEFT_EYE_MIN,
-                LEFT_EYE_MAX,
-                RIGHT_EYE_MIN,
-                RIGHT_EYE_MAX,
-            )
-        )
-        print(
-            "PIT center/range: {} / {}..{}".format(
-                PITCH_CENTER,
-                PITCH_MIN,
-                PITCH_MAX,
-            )
-        )
-        print("vertical tracking: ENABLED -> PIT")
-        print(
-            "base yaw center/range: {} / {}..{}".format(
-                BASE_YAW_CENTER,
-                BASE_YAW_MIN,
-                BASE_YAW_MAX,
-            )
-        )
-        print("X overflow handoff: DISABLED (YAW/base untouched)")
-        print("neck left/right tracking: DISABLED")
-        print("============================================")
+        print("========== Visual follower R18 (camera in eye) ==========")
+        print("deg/px X={} Y={}".format(X_SERVO_DEG_PER_PX, Y_SERVO_DEG_PER_PX))
+        print("eye range L={}..{} R={}..{}".format(
+            LEFT_EYE_MIN, LEFT_EYE_MAX, RIGHT_EYE_MIN, RIGHT_EYE_MAX))
+        print("PIT center/range: {} / {}..{}".format(PITCH_CENTER, PITCH_MIN, PITCH_MAX))
+        print("base yaw center/range: {} / {}..{} (handoff beyond eye limit)".format(
+            BASE_YAW_CENTER, BASE_YAW_MIN, BASE_YAW_MAX))
+        print("=========================================================")
 
-    def _set_eye_targets(self, left, right):
-        self.left_command = clamp(
-            left,
-            LEFT_EYE_MIN,
-            LEFT_EYE_MAX,
-        )
-        self.right_command = clamp(
-            right,
-            RIGHT_EYE_MIN,
-            RIGHT_EYE_MAX,
-        )
+    # ------------------------------------------------------------ geometry
+    def _gaze_offset(self):
+        left = (self.servos["EYL"].pos - LEFT_EYE_CENTER) * LEFT_EYE_DIRECTION
+        right = (self.servos["EYR"].pos - RIGHT_EYE_CENTER) * RIGHT_EYE_DIRECTION
+        return 0.5 * (left + right)
 
-        self.servos["EYL"].set_target(
-            self.left_command
-        )
-        self.servos["EYR"].set_target(
-            self.right_command
-        )
+    def _pitch_offset(self):
+        return (self.servos["PIT"].pos - PITCH_CENTER) * PITCH_DIRECTION
 
-    def _set_pitch_target(self, angle):
-        self.pitch_command = clamp(
-            angle,
-            PITCH_MIN,
-            PITCH_MAX,
-        )
+    def _base_offset(self):
+        return ((self.servos["YAW"].pos - BASE_YAW_CENTER) * BASE_YAW_DIRECTION
+                * BASE_TO_GAZE_RATIO)
 
+    @staticmethod
+    def _gaze_limits():
+        # Soft limits of both eyes expressed as a common gaze offset range.
+        def offsets(center, low, high, direction):
+            a = (low - center) * direction
+            b = (high - center) * direction
+            return (a, b) if a < b else (b, a)
+        l_lo, l_hi = offsets(LEFT_EYE_CENTER, LEFT_EYE_MIN, LEFT_EYE_MAX, LEFT_EYE_DIRECTION)
+        r_lo, r_hi = offsets(RIGHT_EYE_CENTER, RIGHT_EYE_MIN, RIGHT_EYE_MAX, RIGHT_EYE_DIRECTION)
+        return max(l_lo, r_lo), min(l_hi, r_hi)
+
+    @staticmethod
+    def _pitch_limits():
+        a = (PITCH_MIN - PITCH_CENTER) * PITCH_DIRECTION
+        b = (PITCH_MAX - PITCH_CENTER) * PITCH_DIRECTION
+        return (a, b) if a < b else (b, a)
+
+    def _record_history(self, now):
+        self.history[self.history_index] = (
+            now, self._gaze_offset(), self._pitch_offset(), self._base_offset())
+        self.history_index = (self.history_index + 1) % HISTORY_LENGTH
+        if self.history_count < HISTORY_LENGTH:
+            self.history_count += 1
+        self.last_history_at = now
+
+    def _history_at(self, t_ms):
+        """Servo offsets at time t_ms (linear interpolation, clamped)."""
+        newest = (self.history_index - 1) % HISTORY_LENGTH
+        after = self.history[newest]
+        if time.ticks_diff(t_ms, after[0]) >= 0:
+            return after
+        for i in range(1, self.history_count):
+            entry = self.history[(newest - i) % HISTORY_LENGTH]
+            if time.ticks_diff(t_ms, entry[0]) >= 0:
+                span = time.ticks_diff(after[0], entry[0])
+                if span <= 0:
+                    return entry
+                f = time.ticks_diff(t_ms, entry[0]) / span
+                return (
+                    t_ms,
+                    entry[1] + (after[1] - entry[1]) * f,
+                    entry[2] + (after[2] - entry[2]) * f,
+                    entry[3] + (after[3] - entry[3]) * f,
+                )
+            after = entry
+        return after  # older than the history: use the oldest sample
+
+    # ------------------------------------------------------------ commands
+    def _apply_gaze(self, gaze):
+        self.gaze_cmd = gaze
+        left = clamp(LEFT_EYE_CENTER + gaze * LEFT_EYE_DIRECTION, LEFT_EYE_MIN, LEFT_EYE_MAX)
+        right = clamp(RIGHT_EYE_CENTER + gaze * RIGHT_EYE_DIRECTION, RIGHT_EYE_MIN, RIGHT_EYE_MAX)
+        self.servos["EYL"].set_target(left)
+        self.servos["EYR"].set_target(right)
+
+    def _apply_pitch(self, pitch):
+        self.pitch_cmd = pitch
         self.servos["PIT"].set_target(
-            self.pitch_command
-        )
+            clamp(PITCH_CENTER + pitch * PITCH_DIRECTION, PITCH_MIN, PITCH_MAX))
 
-    def _set_base_target(self, angle):
-        self.base_command = clamp(
-            angle,
-            BASE_YAW_MIN,
-            BASE_YAW_MAX,
-        )
-
-    def _return_center(self, include_pitch=True):
-        self.left_command = move_towards(
-            self.left_command,
-            LEFT_EYE_CENTER,
-            MAX_COMMAND_STEP_DEG,
-        )
-        self.right_command = move_towards(
-            self.right_command,
-            RIGHT_EYE_CENTER,
-            MAX_COMMAND_STEP_DEG,
-        )
-
-        if include_pitch:
-            self.pitch_command = move_towards(
-                self.pitch_command,
-                PITCH_CENTER,
-                PITCH_MAX_COMMAND_STEP_DEG,
-            )
-
-        self._set_eye_targets(
-            self.left_command,
-            self.right_command,
-        )
-
-        if include_pitch:
-            self._set_pitch_target(
-                self.pitch_command
-            )
+    def _set_pitch_tuning(self, active):
+        servo = self.servos["PIT"]
+        if active:
+            servo.max_speed = PITCH_TRACK_MAX_SPEED
+            servo.max_accel = PITCH_TRACK_MAX_ACCEL
+            self.pitch_tuning_applied = True
+        elif self.pitch_tuning_applied:
+            servo.max_speed = self.pitch_default_speed
+            servo.max_accel = self.pitch_default_accel
+            self.pitch_tuning_applied = False
 
     def release_to_home(self):
         """
-        Release only the three Facetrack-owned servos to their neutral
-        positions.  Other servos are intentionally untouched.
+        Release only the Facetrack-owned eye/pitch servos to neutral.
+        Other servos (and the base) are intentionally untouched.
         """
-        self.left_command = LEFT_EYE_CENTER
-        self.right_command = RIGHT_EYE_CENTER
-        self.pitch_command = PITCH_CENTER
-
+        self.gaze_cmd = 0.0
+        self.pitch_cmd = 0.0
         self.servos["EYL"].set_immediate(LEFT_EYE_CENTER)
         self.servos["EYR"].set_immediate(RIGHT_EYE_CENTER)
         self.servos["PIT"].set_immediate(PITCH_CENTER)
-
+        self._set_pitch_tuning(False)
         self.has_target = False
-        self.filter_ready = False
-        self.x_history = []
-        self.y_history = []
+        self.filter_x.ready = False
+        self.filter_y.ready = False
         self.last_frame_id = self.vision.frame_id
 
+    # ------------------------------------------------------------ frames
     def _accept_new_frame(self, now):
         if self.vision.frame_id == self.last_frame_id:
             return
-
         self.last_frame_id = self.vision.frame_id
 
         best = self.vision.get_best_box()
-
         if best is None:
             return
-
-        x = float(best[0])
-        y = float(best[1])
-
-        # Guard against malformed detections.
-        if x < 0 or x > FRAME_WIDTH:
+        try:
+            x = float(best[0])
+            y = float(best[1])
+        except (TypeError, ValueError):
             return
-        if y < 0 or y > FRAME_HEIGHT:
+        if x < 0 or x > FRAME_WIDTH or y < 0 or y > FRAME_HEIGHT:
             return
 
-        self.raw_x = x
-        self.raw_y = y
+        capture_ms = self.vision.last_capture_ms
+        _, gaze_at, pitch_at, base_at = self._history_at(capture_ms)
 
-        # ----------------------------------------------------------
-        # Layer 1: rolling median filters for both X and Y.
-        # ----------------------------------------------------------
-        self.x_history.append(x)
-        self.y_history.append(y)
+        err_x = x - FRAME_CENTER_X
+        err_y = y - FRAME_CENTER_Y
+        self.raw_err_x = err_x
+        self.raw_err_y = err_y
+        if abs(err_x) <= X_DEADZONE_PX:
+            err_x = 0.0
+        if abs(err_y) <= Y_DEADZONE_PX:
+            err_y = 0.0
 
-        if len(self.x_history) > X_MEDIAN_WINDOW:
-            self.x_history.pop(0)
-        if len(self.y_history) > Y_MEDIAN_WINDOW:
-            self.y_history.pop(0)
+        # Face direction where the camera was pointing at capture time.
+        meas_x = gaze_at + base_at + CORRECTION_GAIN * err_x * X_SERVO_DEG_PER_PX
+        meas_y = pitch_at + CORRECTION_GAIN * err_y * Y_SERVO_DEG_PER_PX
 
-        sorted_x = sorted(self.x_history)
-        middle_x = len(sorted_x) // 2
-
-        if len(sorted_x) % 2:
-            median_x = sorted_x[middle_x]
+        t_s = capture_ms / 1000.0
+        reacquired = (not self.has_target or
+                      time.ticks_diff(now, self.last_target_at) > TARGET_LOST_MS)
+        if reacquired:
+            self.filter_x.reset(meas_x, t_s)
+            self.filter_y.reset(meas_y, t_s)
+            self.face_x = meas_x
+            self.face_y = meas_y
         else:
-            median_x = (
-                sorted_x[middle_x - 1]
-                + sorted_x[middle_x]
-            ) / 2.0
+            self.face_x = self.filter_x.update(meas_x, t_s)
+            self.face_y = self.filter_y.update(meas_y, t_s)
 
-        sorted_y = sorted(self.y_history)
-        middle_y = len(sorted_y) // 2
-
-        if len(sorted_y) % 2:
-            median_y = sorted_y[middle_y]
-        else:
-            median_y = (
-                sorted_y[middle_y - 1]
-                + sorted_y[middle_y]
-            ) / 2.0
-
-        self.median_x = median_x
-        self.median_y = median_y
-
-        # ----------------------------------------------------------
-        # Layer 2: independent adaptive EMA filters.
-        #
-        # X is a little more responsive.
-        # Y is deliberately more stable because PIT moves the whole head.
-        # ----------------------------------------------------------
-        if not self.filter_ready:
-            self.filtered_x = median_x
-            self.filtered_y = median_y
-            self.filter_ready = True
-        else:
-            x_delta = abs(
-                median_x - self.filtered_x
-            )
-            y_delta = abs(
-                median_y - self.filtered_y
-            )
-
-            if x_delta >= TARGET_X_MOVING_THRESHOLD_PX:
-                alpha_x = TARGET_X_ALPHA_MOVING
-            else:
-                alpha_x = TARGET_X_ALPHA_STABLE
-
-            if y_delta >= TARGET_Y_MOVING_THRESHOLD_PX:
-                alpha_y = TARGET_Y_ALPHA_MOVING
-            else:
-                alpha_y = TARGET_Y_ALPHA_STABLE
-
-            self.filtered_x = (
-                alpha_x * median_x
-                + (1.0 - alpha_x) * self.filtered_x
-            )
-            self.filtered_y = (
-                alpha_y * median_y
-                + (1.0 - alpha_y) * self.filtered_y
-            )
-
+        self.target_capture_ms = capture_ms
         self.last_target_at = now
         self.has_target = True
 
-    def update(
-        self,
-        now,
-        state_name,
-        enabled=True,
-    ):
+    def _predicted(self, value, flt, now):
+        if PREDICTION_GAIN <= 0:
+            return value
+        lead_s = time.ticks_diff(now, self.target_capture_ms) / 1000.0
+        if lead_s < 0:
+            lead_s = 0.0
+        if lead_s > 0.25:
+            lead_s = 0.25
+        speed = flt.dx
+        if speed > PREDICTION_MIN_SPEED_DEG_S:
+            speed -= PREDICTION_MIN_SPEED_DEG_S
+        elif speed < -PREDICTION_MIN_SPEED_DEG_S:
+            speed += PREDICTION_MIN_SPEED_DEG_S
+        else:
+            return value
+        lead = clamp(speed * lead_s * PREDICTION_GAIN, -PREDICTION_MAX_DEG, PREDICTION_MAX_DEG)
+        return value + lead
+
+    # ------------------------------------------------------------ update
+    def update(self, now, state_name, enabled=True):
         enabled = bool(enabled)
 
-        # GP21 logical enable reaches all the way down to the Vision driver:
-        # OFF pauses new AT/startup/inference requests, while UART is still
-        # serviced so an already-pending reply cannot wedge the parser.
+        # GP21 logical enable reaches the Vision driver: OFF stops inference
+        # while UART is still serviced so a pending reply cannot wedge it.
         self.vision.set_enabled(enabled, now)
         self.vision.update(now)
 
+        if time.ticks_diff(now, self.last_history_at) >= HISTORY_INTERVAL_MS:
+            self._record_history(now)
+
         if enabled != self.tracking_enabled_prev:
             self.tracking_enabled_prev = enabled
-
-            if enabled:
-                # Do not jump toward a stale detection collected before OFF.
-                self.has_target = False
-                self.filter_ready = False
-                self.x_history = []
-                self.y_history = []
-                self.last_frame_id = self.vision.frame_id
-            else:
-                self.has_target = False
-                self.last_frame_id = self.vision.frame_id
+            self.has_target = False
+            self.filter_x.ready = False
+            self.filter_y.ready = False
+            self.last_frame_id = self.vision.frame_id
+            if not enabled:
+                self._set_pitch_tuning(False)
 
         if not enabled:
             return
 
         self._accept_new_frame(now)
 
-        active = state_name in ACTIVE_STATES
-
-        if not active:
+        if state_name not in ACTIVE_STATES:
+            self._set_pitch_tuning(False)
             return
 
-        pitch_tracking_active = (
-            state_name in PITCH_TRACKING_STATES
-        )
+        pitch_tracking_active = state_name in PITCH_TRACKING_STATES
+        self._set_pitch_tuning(pitch_tracking_active)
 
-        # Re-assert vision-owned axes every loop.
-        # SAD deliberately owns PIT, so vision leaves PIT alone there.
-        if pitch_tracking_active:
-            self.servos["PIT"].set_target(
-                self.pitch_command
-            )
-
-        self.servos["YAW"].set_target(
-            self.base_command
-        )
-
-        if (
-            time.ticks_diff(
-                now,
-                self.last_control_at,
-            )
-            < CONTROL_INTERVAL_MS
-        ):
-            return
-
+        dt = time.ticks_diff(now, self.last_control_at) / 1000.0
         self.last_control_at = now
+        if dt < 0 or dt > 0.1:
+            dt = 0.0
 
-        target_is_fresh = (
-            self.has_target
-            and time.ticks_diff(
-                now,
-                self.last_target_at,
-            )
-            <= TARGET_LOST_MS
-        )
+        target_fresh = (self.has_target and
+                        time.ticks_diff(now, self.last_target_at) <= TARGET_LOST_MS)
 
-        if not target_is_fresh:
-            self._return_center(
-                include_pitch=pitch_tracking_active
-            )
-            return
+        gaze_lo, gaze_hi = self._gaze_limits()
 
-        # ==========================================================
-        # X -> eyes
-        # ==========================================================
-        error_x = self.filtered_x - FRAME_CENTER_X
+        if target_fresh:
+            # ---------------------------------------------- X: eyes + base
+            wanted_head = self._predicted(self.face_x, self.filter_x, now)
+            base_now = self._base_offset()
+            wanted_gaze = wanted_head - base_now
+            gaze = clamp(wanted_gaze, gaze_lo, gaze_hi)
+            self._apply_gaze(gaze)
 
-        if abs(error_x) <= X_DEADZONE_PX:
-            desired_eye_offset = 0.0
+            # Base handoff: excess of the wanted gaze beyond the comfort zone.
+            comfort_lo = gaze_lo + BASE_COMFORT_MARGIN_DEG
+            comfort_hi = gaze_hi - BASE_COMFORT_MARGIN_DEG
+            if wanted_gaze > comfort_hi:
+                excess = wanted_gaze - comfort_hi
+            elif wanted_gaze < comfort_lo:
+                excess = wanted_gaze - comfort_lo
+            else:
+                excess = 0.0
+            self.base_handoff_active = abs(excess) > BASE_HANDOFF_DEADBAND_DEG
+            if self.base_handoff_active and dt > 0:
+                speed = clamp(excess * BASE_HANDOFF_GAIN,
+                              -BASE_MAX_SPEED_DEG_S, BASE_MAX_SPEED_DEG_S)
+                step = speed * dt / BASE_TO_GAZE_RATIO
+                self.base_command = clamp(
+                    self.base_command + BASE_YAW_DIRECTION * step,
+                    BASE_YAW_MIN, BASE_YAW_MAX)
+
+            # ---------------------------------------------- Y: pitch
+            if pitch_tracking_active:
+                pitch_lo, pitch_hi = self._pitch_limits()
+                wanted_pitch = self._predicted(self.face_y, self.filter_y, now)
+                self._apply_pitch(clamp(wanted_pitch, pitch_lo, pitch_hi))
         else:
-            if error_x > 0:
-                effective_x = error_x - X_DEADZONE_PX
-            else:
-                effective_x = error_x + X_DEADZONE_PX
+            # Face lost: glide eyes (and pitch) back to centre; base holds.
+            step = RETURN_SPEED_DEG_S * dt
+            self._apply_gaze(move_towards(self.gaze_cmd, 0.0, step))
+            if pitch_tracking_active:
+                self._apply_pitch(move_towards(self.pitch_cmd, 0.0, step))
+            self.base_handoff_active = False
 
-            desired_eye_offset = (
-                effective_x
-                * EYE_GAIN_DEG_PER_PX
-            )
+        # The base is Facetrack-owned while tracking is active.
+        self.servos["YAW"].set_target(self.base_command)
 
-        desired_left_unclamped = (
-            LEFT_EYE_CENTER
-            + LEFT_EYE_DIRECTION * desired_eye_offset
-        )
-        desired_right_unclamped = (
-            RIGHT_EYE_CENTER
-            + RIGHT_EYE_DIRECTION * desired_eye_offset
-        )
-
-        desired_left = clamp(
-            desired_left_unclamped,
-            LEFT_EYE_MIN,
-            LEFT_EYE_MAX,
-        )
-        desired_right = clamp(
-            desired_right_unclamped,
-            RIGHT_EYE_MIN,
-            RIGHT_EYE_MAX,
-        )
-
-        left_delta = abs(
-            desired_left - self.left_command
-        )
-        right_delta = abs(
-            desired_right - self.right_command
-        )
-
-        if (
-            left_delta >= EYE_COMMAND_HYSTERESIS_DEG
-            or right_delta >= EYE_COMMAND_HYSTERESIS_DEG
-        ):
-            next_left = move_towards(
-                self.left_command,
-                desired_left,
-                MAX_COMMAND_STEP_DEG,
-            )
-            next_right = move_towards(
-                self.right_command,
-                desired_right,
-                MAX_COMMAND_STEP_DEG,
-            )
-
-            self._set_eye_targets(
-                next_left,
-                next_right,
-            )
-
-        # ==========================================================
-        # X overflow -> base/body YAW
-        #
-        # Incremental handoff avoids hunting:
-        # eyes hit edge -> base follows -> camera recenters target
-        # -> eyes come off edge -> base stops and holds.
-        # ==========================================================
-        left_overflow = 0.0
-        right_overflow = 0.0
-
-        if desired_left_unclamped > LEFT_EYE_MAX:
-            left_overflow = desired_left_unclamped - LEFT_EYE_MAX
-        elif desired_left_unclamped < LEFT_EYE_MIN:
-            left_overflow = desired_left_unclamped - LEFT_EYE_MIN
-
-        if desired_right_unclamped > RIGHT_EYE_MAX:
-            right_overflow = desired_right_unclamped - RIGHT_EYE_MAX
-        elif desired_right_unclamped < RIGHT_EYE_MIN:
-            right_overflow = desired_right_unclamped - RIGHT_EYE_MIN
-
-        eye_overflow = left_overflow
-        if abs(right_overflow) > abs(eye_overflow):
-            eye_overflow = right_overflow
-
-        self.base_handoff_active = (
-            abs(eye_overflow) >= BASE_HANDOFF_HYSTERESIS_DEG
-        )
-
-        if self.base_handoff_active:
-            # Use image-X direction, independent of mirrored eye mechanics.
-            if error_x > 0:
-                base_step = (
-                    BASE_YAW_DIRECTION * BASE_MAX_COMMAND_STEP_DEG
-                )
-            else:
-                base_step = (
-                    -BASE_YAW_DIRECTION * BASE_MAX_COMMAND_STEP_DEG
-                )
-
-            self._set_base_target(
-                self.base_command + base_step
-            )
-
-        # ==========================================================
-        # Y -> neck pitch
-        # ==========================================================
-        if pitch_tracking_active:
-            error_y = self.filtered_y - FRAME_CENTER_Y
-
-            if abs(error_y) <= Y_DEADZONE_PX:
-                desired_pitch_offset = 0.0
-            else:
-                if error_y > 0:
-                    effective_y = error_y - Y_DEADZONE_PX
-                else:
-                    effective_y = error_y + Y_DEADZONE_PX
-
-                desired_pitch_offset = (
-                    effective_y
-                    * PITCH_GAIN_DEG_PER_PX
-                )
-
-            desired_pitch = (
-                PITCH_CENTER
-                + PITCH_DIRECTION * desired_pitch_offset
-            )
-
-            desired_pitch = clamp(
-                desired_pitch,
-                PITCH_MIN,
-                PITCH_MAX,
-            )
-
-            pitch_delta = abs(
-                desired_pitch - self.pitch_command
-            )
-
-            if pitch_delta >= PITCH_COMMAND_HYSTERESIS_DEG:
-                next_pitch = move_towards(
-                    self.pitch_command,
-                    desired_pitch,
-                    PITCH_MAX_COMMAND_STEP_DEG,
-                )
-
-                self._set_pitch_target(
-                    next_pitch
-                )
-
-        if (
-            time.ticks_diff(
-                now,
-                self.last_log_at,
-            )
-            >= CONTROL_LOG_EVERY_MS
-        ):
+        if time.ticks_diff(now, self.last_log_at) >= CONTROL_LOG_EVERY_MS:
+            fps, latency = self.vision.take_stats(now)
             print(
-                "[TRACK] "
-                "X raw={:.1f} med={:.1f} filt={:.1f} "
-                "EYL={:.1f} EYR={:.1f} | "
-                "Y raw={:.1f} med={:.1f} filt={:.1f} "
-                "PIT={:.1f}".format(
-                    self.raw_x,
-                    self.median_x,
-                    self.filtered_x,
-                    self.left_command,
-                    self.right_command,
-                    self.raw_y,
-                    self.median_y,
-                    self.filtered_y,
-                    self.pitch_command,
+                "[TRACK] fps={:.1f} lat={:.0f}ms {} | errX={:.0f}px errY={:.0f}px | "
+                "face X={:.1f} Y={:.1f} | gaze={:.1f} PIT={:.1f} YAW={:.1f}{}".format(
+                    fps, latency,
+                    "stream" if self.vision.streaming else "single",
+                    self.raw_err_x, self.raw_err_y,
+                    self.face_x, self.face_y,
+                    self.gaze_cmd, self.servos["PIT"].target, self.base_command,
+                    " HANDOFF" if self.base_handoff_active else "",
                 )
             )
             self.last_log_at = now
-
