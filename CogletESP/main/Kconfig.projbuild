@@ -829,6 +829,50 @@ endmenu
 
 endmenu
 
+# NMRobotics Coglet: local reminders.
+menu "NMRobotics Coglet Reminder"
+
+    config COGLET_REMINDER_SPEAK
+        bool "Speak the reminder after the chime"
+        default y
+        help
+            When a reminder fires (idle or in the middle of a conversation),
+            Coglet plays the reminder chime, then opens a short session in which
+            the LLM fetches the reminder text (self.coglet.reminder.last_due) and
+            says it, and finally returns to standby by itself.
+            Off: only the chime plays (original behaviour).
+
+    choice COGLET_REMINDER_TZ_SOURCE
+        prompt "Reminder time zone"
+        default COGLET_REMINDER_TZ_AUTO
+        help
+            Reminders are entered and spoken in the device's local time.
+
+        config COGLET_REMINDER_TZ_AUTO
+            bool "Automatic (time zone offset sent by the xiaozhi server)"
+            help
+                Uses server_time.timezone_offset from the OTA check. Falls back
+                to UTC+08:00 until the server has answered. A fixed offset does
+                not know about future daylight-saving changes.
+
+        config COGLET_REMINDER_TZ_MANUAL
+            bool "Manual (POSIX TZ string)"
+    endchoice
+
+    config COGLET_REMINDER_TZ
+        string "POSIX TZ string"
+        default "CST-8"
+        depends on COGLET_REMINDER_TZ_MANUAL
+        help
+            Note the inverted sign of POSIX offsets. Examples:
+              Beijing           CST-8
+              Berlin / Paris    CET-1CEST,M3.5.0,M10.5.0/3
+              London            GMT0BST,M3.5.0/1,M10.5.0
+              New York          EST5EDT,M3.2.0,M11.1.0
+            Daylight-saving rules are applied automatically.
+
+endmenu
+
 # NMRobotics unified firmware: startup / reminder sound selection.
 # Reminder itself is mandatory; only its sound can be selected.
 menu "NMRobotics Coglet Sounds"

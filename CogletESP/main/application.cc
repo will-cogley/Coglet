@@ -474,6 +474,14 @@ void Application::Start() {
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 Schedule([this]() {
+                    if (reminder_session_active_) {
+                        reminder_last_tts_stop_us_ = esp_timer_get_time();
+                        if (reminder_text_delivered_) {
+                            // The reminder has been said: return to idle once
+                            // the last audio has finished playing.
+                            reminder_close_after_playback_ = true;
+                        }
+                    }
                     if (auto_awake_sleep_latched_) return;
                     if (device_state_ == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {
@@ -685,8 +693,14 @@ void Application::MainEventLoop() {
                     display->ShowNotification(("提醒：" + alarm.message).c_str());
                     ESP_LOGI("CogletSounds", "PLAY reminder=%s", CogletSounds::ReminderName());
                     audio_service_.PlaySound(CogletSounds::Reminder());
+#if CONFIG_COGLET_REMINDER_SPEAK
+                    // After the chime Coglet says the reminder out loud.
+                    reminder_speech_pending_ = true;
+                    reminder_speech_deadline_us_ = esp_timer_get_time() + 5LL * 60 * 1000000;
+#endif
                 }
             }
+            UpdateReminderSpeech();
             // Manual wakes get the same AFE-before-UDP staging every time,
             // not just the first wake after cold boot.
             AdvanceStaggeredWakeTick();
@@ -758,6 +772,27 @@ void Application::CancelStaggeredWake() {
     wake_session_popup_ = false;
     wake_session_next_send_us_ = 0;
     wake_session_failure_streak_ = 0;
+    wake_session_proactive_ = false;
+}
+
+bool Application::StartDeviceSession(const std::string& context_text) {
+    if (!protocol_ || device_state_ != kDeviceStateIdle ||
+        wake_session_stage_ != WakeSessionStage::None) {
+        ESP_LOGW(AUTO_AWAKE_TAG, "PROACTIVE_SKIPPED: state=%s stage=%d",
+                 STATE_STRINGS[device_state_], static_cast<int>(wake_session_stage_));
+        return false;
+    }
+    // No cached wake audio (send_data=false) and no popup: Coglet speaks first.
+    BeginStaggeredWake(context_text, false,
+                       aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime,
+                       false);
+    if (wake_session_stage_ != WakeSessionStage::Prepare) {
+        ESP_LOGW(AUTO_AWAKE_TAG, "PROACTIVE_SKIPPED: staged wake did not start");
+        return false;
+    }
+    wake_session_proactive_ = true;
+    ESP_LOGW(AUTO_AWAKE_TAG, "PROACTIVE_START: text=%s", context_text.c_str());
+    return true;
 }
 
 void Application::BeginStaggeredWake(const std::string& word, bool send_data,
@@ -776,6 +811,72 @@ void Application::BeginStaggeredWake(const std::string& word, bool send_data,
     wake_session_delay_ticks_ = kManualWakeInitialTicks;
     SetDeviceState(kDeviceStateConnecting);
     ESP_LOGI(AUTO_AWAKE_TAG, "LOCAL_WAKE_STAGE: prepare word=%s", word.c_str());
+}
+
+void Application::CloseReminderSession(const char* reason) {
+    ESP_LOGW("CogletReminder", "SPEECH_DONE (%s): closing session -> idle", reason);
+    reminder_session_active_ = false;
+    reminder_close_after_playback_ = false;
+    if (protocol_ && protocol_->IsAudioChannelOpened()) {
+        protocol_->CloseAudioChannel();   // OnAudioChannelClosed -> idle
+    } else {
+        SetDeviceState(kDeviceStateIdle);
+    }
+}
+
+// Called on the 1-second clock tick.
+void Application::UpdateReminderSpeech() {
+#if CONFIG_COGLET_REMINDER_SPEAK
+    static constexpr const char* kReminderCue = "（有提醒到点了）";  // <= 13 chars for xiaozhi.me
+    const int64_t now = esp_timer_get_time();
+
+    if (reminder_session_active_) {
+        const bool channel_open = protocol_ && protocol_->IsAudioChannelOpened();
+        if (device_state_ == kDeviceStateIdle && wake_session_stage_ == WakeSessionStage::None &&
+            !channel_open) {
+            // Session ended by itself (server goodbye, open failure, user button).
+            reminder_session_active_ = false;
+            reminder_close_after_playback_ = false;
+            return;
+        }
+        if (reminder_close_after_playback_ && audio_service_.IsIdle() &&
+            device_state_ != kDeviceStateSpeaking) {
+            CloseReminderSession("reminder spoken");
+        } else if (!reminder_text_delivered_ && reminder_last_tts_stop_us_ > 0 &&
+                   now - reminder_last_tts_stop_us_ > 8LL * 1000000 &&
+                   audio_service_.IsIdle() && device_state_ != kDeviceStateSpeaking) {
+            // The LLM answered without fetching the text: don't hang around.
+            CloseReminderSession("answered without last_due");
+        } else if (now - reminder_session_started_us_ > 45LL * 1000000) {
+            CloseReminderSession("safety timeout");
+        }
+        return;
+    }
+
+    if (!reminder_speech_pending_) {
+        return;
+    }
+    if (now > reminder_speech_deadline_us_) {
+        reminder_speech_pending_ = false;
+        ESP_LOGW("CogletReminder", "SPEECH_SKIPPED: device stayed busy");
+        return;
+    }
+    const bool ready = protocol_ != nullptr && device_state_ == kDeviceStateIdle &&
+                       wake_session_stage_ == WakeSessionStage::None &&
+                       !auto_awake_boot_pending_ && audio_service_.IsIdle();  // chime finished
+    if (!ready) {
+        return;
+    }
+    reminder_text_delivered_ = false;
+    if (StartDeviceSession(kReminderCue)) {
+        reminder_speech_pending_ = false;
+        reminder_session_active_ = true;
+        reminder_session_started_us_ = now;
+        reminder_last_tts_stop_us_ = 0;
+        reminder_close_after_playback_ = false;
+        ESP_LOGW("CogletReminder", "SPEECH_START: opening session to say the reminder");
+    }
+#endif
 }
 
 void Application::AdvanceStaggeredWakeTick() {
@@ -823,7 +924,14 @@ void Application::AdvanceStaggeredWakeTick() {
     } else {
         const ListeningMode mode = wake_session_mode_;
         const bool popup = wake_session_popup_;
+        const bool proactive = wake_session_proactive_;
+        const std::string context_text = wake_session_word_;
         CancelStaggeredWake();
+        if (proactive) {
+            // Same protocol order as a real wake: detect (with text) -> listen.
+            protocol_->SendWakeWordDetected(context_text);
+            ESP_LOGW(AUTO_AWAKE_TAG, "PROACTIVE_DETECT_SENT: %s", context_text.c_str());
+        }
         SetListeningMode(mode);
         if (popup) audio_service_.PlaySound(Lang::Sounds::OGG_POPUP);
     }

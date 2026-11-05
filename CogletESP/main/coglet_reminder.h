@@ -7,8 +7,11 @@
 #include <string>
 #include <vector>
 
-// China UTC+08 demo. ESP-IDF wall clock is kept in UTC by the OTA time fix.
-// Reminder entries are persisted in NVS; alarm output is independent of cloud sessions.
+// Local reminders. The ESP-IDF wall clock is kept in UTC (OTA server_time);
+// reminders are entered and shown in the device's local time zone, which is
+// taken from the OTA server (timezone_offset) or set manually in menuconfig.
+// Entries are stored as UTC epochs in NVS, so a time-zone change never moves
+// an already-saved reminder.
 class CogletReminder {
 public:
     struct Due {
@@ -28,6 +31,15 @@ public:
     // Persists removal before handing alarms to the audio playback logic.
     bool HasDue() const;
     std::vector<Due> TakeDueIfIdle();
+
+    // Time zone. Auto mode: called by the OTA check with the server's
+    // timezone_offset (minutes east of UTC). Ignored in manual mode.
+    void SetServerTimezoneOffset(int minutes);
+    std::string TimezoneLabel() const;
+
+    // Text of the reminder(s) that fired most recently, for the LLM to speak
+    // (self.coglet.reminder.last_due). Empty if nothing fired recently.
+    std::string LastFiredText(int max_age_seconds = 900) const;
 
 private:
     CogletReminder();
@@ -59,5 +71,14 @@ private:
     bool SaveLocked();
     static bool HasValidClock();
     static std::string FormatTime(time_t epoch);
-    static bool ParseChinaLocalTime(const std::string& datetime, time_t& epoch);
+    static bool ParseLocalTime(const std::string& datetime, time_t& epoch);
+    void ApplyTimezoneLocked();
+
+    bool tz_from_server_ = false;
+    int tz_offset_minutes_ = 480;
+    std::string tz_label_;
+
+    std::string last_fired_message_;
+    std::string last_fired_time_;
+    int64_t last_fired_epoch_ = 0;
 };

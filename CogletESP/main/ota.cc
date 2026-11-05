@@ -1,4 +1,5 @@
 #include "ota.h"
+#include "coglet_reminder.h"
 #include "system_info.h"
 #include "settings.h"
 #include "assets/lang_config.h"
@@ -195,10 +196,9 @@ esp_err_t Ota::CheckVersion() {
             
             // 如果有时区偏移，计算本地时间
             if (cJSON_IsNumber(timezone_offset)) {
-                // Reminder V1: timestamp is UTC epoch milliseconds; never add timezone to it.
-                if (timezone_offset->valueint != 480) {
-                    ESP_LOGW(TAG, "Reminder V1 assumes China UTC+8; OTA offset=%d min", timezone_offset->valueint);
-                }
+                // timestamp is a UTC epoch (ms): never add the offset to it.
+                // The offset only selects the local time zone for reminders.
+                CogletReminder::Instance().SetServerTimezoneOffset(timezone_offset->valueint);
             }
             
             tv.tv_sec = (time_t)(ts / 1000);  // 转换毫秒为秒

@@ -271,8 +271,8 @@ private:
         // Coglet Reminder V1: independent of AEC and active after cloud conversation ends.
         mcp_server.AddTool(
             "self.coglet.reminder.get_time",
-            "设置任何提醒之前，先调用本工具获取 Coglet 设备的北京时间。\n"
-            "再计算用户说的今天、明天、后天或者几分钟后的准确日期时间。",
+            "设置任何提醒之前，先调用本工具获取 Coglet 设备的本地时间和时区。\n"
+            "再按这个时区计算用户说的今天、明天、后天或者几分钟后的准确日期时间。",
             PropertyList(),
             [](const PropertyList&) -> ReturnValue {
                 return CogletReminder::Instance().Now();
@@ -281,10 +281,14 @@ private:
 
         mcp_server.AddTool(
             "self.coglet.reminder.create",
-            "创建一次性设备本地提醒。必须先调用 self.coglet.reminder.get_time 获取当前北京时间。\n"
-            "datetime 必须为北京时间 YYYY-MM-DD HH:MM:SS，不能写模糊时间或 UTC 偏移。\n"
+            "创建一次性设备本地提醒。必须先调用 self.coglet.reminder.get_time 获取设备当前本地时间和时区。\n"
+            "datetime 必须为设备本地时间 YYYY-MM-DD HH:MM:SS（按 get_time 返回的时区），不能写模糊时间或 UTC 偏移。\n"
             "message 是用户需要提醒的事情。只有本工具返回已保存，才可告诉用户提醒已成功设置。\n"
+#if CONFIG_COGLET_REMINDER_SPEAK
+            "到点会先播放提醒音，再由 Coglet 开口说出提醒内容，说完自动回到待机。",
+#else
             "实验版到点播放提醒音，提醒内容写入日志，不支持任意文字语音朗读。",
+#endif
             PropertyList({
                 Property("datetime", kPropertyTypeString),
                 Property("message", kPropertyTypeString)
@@ -312,7 +316,25 @@ private:
                 return CogletReminder::Instance().Cancel(p["id"].value<int>());
             }
         );
+#if CONFIG_COGLET_REMINDER_SPEAK
+        mcp_server.AddTool(
+            "self.coglet.reminder.last_due",
+            "当你收到（有提醒到点了）时，必须先调用本工具获取刚到点的提醒内容，"
+            "然后只用一句话自然地提醒主人这件事，说完即可，不要追问或展开别的话题。",
+            PropertyList(),
+            [](const PropertyList&) -> ReturnValue {
+                const std::string text = CogletReminder::Instance().LastFiredText();
+                if (text.empty()) {
+                    return std::string("最近 15 分钟内没有到点的提醒。");
+                }
+                Application::GetInstance().OnReminderTextDelivered();
+                return text + "请用一句话提醒主人。";
+            }
+        );
+        ESP_LOGI(TAG, "Registered 5 Coglet reminder MCP tools");
+#else
         ESP_LOGI(TAG, "Registered 4 Coglet reminder MCP tools");
+#endif
 
         ESP_LOGI(TAG, "Registered 5 Coglet motion MCP tools");
     }

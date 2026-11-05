@@ -7,6 +7,7 @@
 #include <esp_timer.h>
 
 #include <cstdint>
+#include <atomic>
 #include <string>
 #include <mutex>
 #include <deque>
@@ -57,6 +58,14 @@ public:
     void StopListening();
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word);
+    // Open a session from idle without a wake word, using the same staged
+    // AFE -> settle -> UDP path, then send `context_text` as the listen/detect
+    // text (xiaozhi.me accepts only short texts, ~13 characters). Call from the
+    // main loop (Schedule). Returns false if not idle or a wake is in progress.
+    bool StartDeviceSession(const std::string& context_text);
+    // Spoken reminder: the MCP tool self.coglet.reminder.last_due calls this
+    // once the LLM has fetched the reminder text (any thread).
+    void OnReminderTextDelivered() { reminder_text_delivered_ = true; }
     bool UpgradeFirmware(Ota& ota, const std::string& url = "");
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
@@ -100,6 +109,19 @@ private:
     std::deque<std::unique_ptr<AudioStreamPacket>> wake_session_packets_;
     int64_t wake_session_next_send_us_ = 0;
     uint8_t wake_session_failure_streak_ = 0;
+    bool wake_session_proactive_ = false;
+
+    // Spoken reminder: chime -> device-initiated session -> the LLM fetches
+    // the text and says it -> playback finished -> back to idle.
+    bool reminder_speech_pending_ = false;
+    int64_t reminder_speech_deadline_us_ = 0;
+    bool reminder_session_active_ = false;
+    int64_t reminder_session_started_us_ = 0;
+    int64_t reminder_last_tts_stop_us_ = 0;
+    bool reminder_close_after_playback_ = false;
+    std::atomic<bool> reminder_text_delivered_{false};
+    void UpdateReminderSpeech();
+    void CloseReminderSession(const char* reason);
     // Non-blocking uplink retry gate (monotonic microseconds).
     int64_t audio_send_retry_after_us_ = 0;
     uint8_t audio_send_failure_streak_ = 0;
