@@ -873,6 +873,23 @@ menu "NMRobotics Coglet Reminder"
 
 endmenu
 
+# NMRobotics Coglet: built-in music dance.
+menu "NMRobotics Coglet Dance"
+
+    config COGLET_DANCE
+        bool "Built-in music dance (MCP tool self.coglet.dance)"
+        default y
+        help
+            Adds three original ~30 s dance tracks (Mecha heavy electro, Evil
+            gothic, Cat gentle anime; ~430 KB of flash) and the MCP tool
+            self.coglet.dance. When the user asks Coglet to dance, the session
+            is closed, the track plays while the RP2040 (music.py) performs the
+            matching hard-coded choreography, and afterwards Coglet opens a new
+            session by itself and asks how the dance was.
+            Off: no tracks are linked and the tool is not registered.
+
+endmenu
+
 # NMRobotics unified firmware: startup / reminder sound selection.
 # Reminder itself is mandatory; only its sound can be selected.
 menu "NMRobotics Coglet Sounds"

@@ -564,7 +564,7 @@ void AudioService::SetCallbacks(AudioServiceCallbacks& callbacks) {
     callbacks_ = callbacks;
 }
 
-void AudioService::PlaySound(const std::string_view& ogg) {
+void AudioService::PlaySound(const std::string_view& ogg, const std::atomic<bool>* cancel) {
     if (!codec_->output_enabled()) {
         esp_timer_stop(audio_power_timer_);
         esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
@@ -656,6 +656,18 @@ void AudioService::PlaySound(const std::string_view& ogg) {
             packet->frame_duration = 60;
             packet->payload.resize(pkt_len);
             std::memcpy(packet->payload.data(), pkt_ptr, pkt_len);
+            if (cancel != nullptr) {
+                // Poll instead of blocking in the queue so a stop request
+                // (ResetDecoder + cancel) ends the feed within ~10 ms.
+                while (!cancel->load()) {
+                    {
+                        std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+                        if (audio_decode_queue_.size() < MAX_DECODE_PACKETS_IN_QUEUE) break;
+                    }
+                    vTaskDelay(pdMS_TO_TICKS(10));
+                }
+                if (cancel->load()) return;
+            }
             PushPacketToDecodeQueue(std::move(packet), true);
         }
 

@@ -2,6 +2,7 @@
 #define AUDIO_SERVICE_H
 
 #include <memory>
+#include <atomic>
 #include <deque>
 #include <condition_variable>
 #include <chrono>
@@ -111,7 +112,10 @@ public:
 
     bool PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait = false);
     std::unique_ptr<AudioStreamPacket> PopPacketFromSendQueue();
-    void PlaySound(const std::string_view& sound);
+    // cancel != nullptr: long sounds (dance tracks) are fed packet by packet;
+    // returns as soon as *cancel becomes true instead of blocking until the
+    // whole file is queued. Call it from a worker task, not the main loop.
+    void PlaySound(const std::string_view& sound, const std::atomic<bool>* cancel = nullptr);
     bool ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples);
     void ResetDecoder();
     void SetModelsList(srmodel_list_t* models_list);

@@ -336,6 +336,29 @@ private:
         ESP_LOGI(TAG, "Registered 4 Coglet reminder MCP tools");
 #endif
 
+#if CONFIG_COGLET_DANCE
+        mcp_server.AddTool(
+            "self.coglet.dance",
+            "当用户让 Coglet 跳舞、跳个舞、来段律动、跟着音乐动起来时调用。Coglet 会结束当前对话，"
+            "播放约 30 秒的内置音乐并跳舞，跳完自动开口。\n"
+            "style：mecha=浑厚机甲电子，evil=忧郁哥特，cat=温柔二次元猫系，random=随机（用户没指定时用）。\n"
+            "调用后只用一句很短的话回应（如“看我的！”），不要再说别的。\n"
+            "当你收到（跳完舞了）时，用一句俏皮的话问主人觉得你刚才跳得怎么样。",
+            PropertyList({Property("style", kPropertyTypeString, std::string("random"))}),
+            [](const PropertyList& p) -> ReturnValue {
+                const std::string style = Application::GetInstance().RequestDance(
+                    p["style"].value<std::string>());
+                if (style.empty()) {
+                    return std::string("Coglet 正在跳舞中，请稍后再试。");
+                }
+                const char* name = style == "mecha" ? "机甲电子" : (style == "evil" ? "忧郁哥特" : "二次元猫系");
+                return std::string("马上开始跳") + name + "舞。只用一句很短的话回应（如“看我的！”），"
+                       "对话会自动结束；跳完后你会收到（跳完舞了），届时问主人觉得怎么样。";
+            }
+        );
+        ESP_LOGI(TAG, "Registered Coglet dance MCP tool");
+#endif
+
         ESP_LOGI(TAG, "Registered 5 Coglet motion MCP tools");
     }
 

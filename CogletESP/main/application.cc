@@ -13,6 +13,7 @@
 #include "coglet_sounds.h"
 
 #include <cstring>
+#include <esp_random.h>
 #include <algorithm>
 #include <esp_log.h>
 #include <cJSON.h>
@@ -474,6 +475,11 @@ void Application::Start() {
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 Schedule([this]() {
+#if CONFIG_COGLET_DANCE
+                    if (dance_stage_ == DanceStage::WaitAck) {
+                        dance_ack_tts_stop_us_ = esp_timer_get_time();
+                    }
+#endif
                     if (reminder_session_active_) {
                         reminder_last_tts_stop_us_ = esp_timer_get_time();
                         if (reminder_text_delivered_) {
@@ -685,7 +691,12 @@ void Application::MainEventLoop() {
                 audio_service_.ResetDecoder();
                 SetDeviceState(kDeviceStateIdle);
             }
-            if (device_state_ == kDeviceStateIdle) {
+            // A dance holds the speaker for ~30 s; a due reminder waits for it.
+            bool dance_holds_speaker = false;
+#if CONFIG_COGLET_DANCE
+            dance_holds_speaker = DanceOwnsDevice();
+#endif
+            if (device_state_ == kDeviceStateIdle && !dance_holds_speaker) {
                 auto display = Board::GetInstance().GetDisplay();
                 for (const auto& alarm : CogletReminder::Instance().TakeDueIfIdle()) {
                     ESP_LOGW("CogletReminder", "FIRE id=%lu due=%s message=%s",
@@ -701,6 +712,9 @@ void Application::MainEventLoop() {
                 }
             }
             UpdateReminderSpeech();
+#if CONFIG_COGLET_DANCE
+            UpdateDance();
+#endif
             // Manual wakes get the same AFE-before-UDP staging every time,
             // not just the first wake after cold boot.
             AdvanceStaggeredWakeTick();
@@ -879,6 +893,146 @@ void Application::UpdateReminderSpeech() {
 #endif
 }
 
+#if CONFIG_COGLET_DANCE
+static constexpr const char* DANCE_TAG = "CogletDance";
+
+std::string Application::RequestDance(const std::string& style) {
+    // Runs on the main thread (McpServer schedules tool calls there).
+    if (dance_stage_ != DanceStage::None || dance_task_running_) {
+        return "";
+    }
+    static const char* const kStyles[] = {"mecha", "evil", "cat"};
+    std::string resolved = style;
+    if (CogletSounds::Dance(resolved).empty()) {
+        resolved = kStyles[esp_random() % 3];   // "random" or anything unknown
+    }
+    dance_style_ = resolved;
+    dance_stage_ = DanceStage::WaitAck;
+    dance_stage_since_us_ = esp_timer_get_time();
+    dance_ack_tts_stop_us_ = 0;
+    ESP_LOGW(DANCE_TAG, "REQUEST style=%s: waiting for the short reply", resolved.c_str());
+    return resolved;
+}
+
+void Application::BeginDancePlayback() {
+    if (dance_task_running_) {
+        return;   // previous feeder still exiting; retry next tick
+    }
+    dance_cancel_ = false;
+    dance_audio_done_ = false;
+    dance_task_running_ = true;
+    audio_service_.ResetDecoder();
+    const std::string command = "dance:" + dance_style_;
+    uart_send_string(command.c_str());
+    BaseType_t ok = xTaskCreate([](void* arg) {
+        auto* app = static_cast<Application*>(arg);
+        app->audio_service_.PlaySound(CogletSounds::Dance(app->dance_style_), &app->dance_cancel_);
+        app->dance_audio_done_ = true;
+        app->dance_task_running_ = false;
+        vTaskDelete(nullptr);
+    }, "coglet_dance", 4096, this, 3, nullptr);
+    if (ok != pdPASS) {
+        ESP_LOGE(DANCE_TAG, "could not start the audio feeder task");
+        dance_task_running_ = false;
+        dance_audio_done_ = true;
+        uart_send_string("dance:stop");
+        dance_stage_ = DanceStage::None;
+        return;
+    }
+    dance_stage_ = DanceStage::Playing;
+    dance_stage_since_us_ = esp_timer_get_time();
+    ESP_LOGW(DANCE_TAG, "PLAY %s (RP2040 choreography started)", dance_style_.c_str());
+}
+
+void Application::StopDance(const char* reason) {
+    const bool was_playing = dance_stage_ == DanceStage::Playing;
+    ESP_LOGW(DANCE_TAG, "STOP (%s)", reason);
+    dance_stage_ = DanceStage::None;
+    if (was_playing) {
+        dance_cancel_ = true;
+        audio_service_.ResetDecoder();
+        uart_send_string("dance:stop");
+    }
+}
+
+// Called on the 1-second clock tick.
+void Application::UpdateDance() {
+    static constexpr const char* kFollowUpCue = "（跳完舞了）";   // <= 13 chars for xiaozhi.me
+    const int64_t now = esp_timer_get_time();
+    const int64_t in_stage = now - dance_stage_since_us_;
+    const bool channel_open = protocol_ && protocol_->IsAudioChannelOpened();
+
+    switch (dance_stage_) {
+    case DanceStage::None:
+        return;
+
+    case DanceStage::WaitAck: {
+        // Let the LLM finish its one-line reply ("看我的！"), then end the session.
+        const bool replied = dance_ack_tts_stop_us_ > 0 && now - dance_ack_tts_stop_us_ > 300000;
+        const bool quiet = audio_service_.IsIdle() && device_state_ != kDeviceStateSpeaking;
+        if ((quiet && (replied || in_stage > 10LL * 1000000)) || in_stage > 20LL * 1000000) {
+            ESP_LOGW(DANCE_TAG, "CLOSE session before dancing");
+            auto_awake_boot_pending_ = false;
+            if (channel_open) {
+                protocol_->CloseAudioChannel();     // OnAudioChannelClosed -> idle
+            } else if (device_state_ != kDeviceStateIdle) {
+                SetDeviceState(kDeviceStateIdle);
+            }
+            dance_stage_ = DanceStage::Starting;
+            dance_stage_since_us_ = now;
+        }
+        return;
+    }
+
+    case DanceStage::Starting:
+        if (device_state_ == kDeviceStateIdle && !channel_open &&
+            wake_session_stage_ == WakeSessionStage::None) {
+            audio_service_.ResetDecoder();      // drop any late TTS tail
+            BeginDancePlayback();
+        } else if (in_stage > 10LL * 1000000) {
+            StopDance("session did not close");
+        }
+        return;
+
+    case DanceStage::Playing:
+        if (dance_audio_done_ && audio_service_.IsIdle()) {
+            ESP_LOGW(DANCE_TAG, "FINISHED %s: follow-up session next", dance_style_.c_str());
+            dance_stage_ = DanceStage::FollowUp;
+            dance_stage_since_us_ = now;
+        } else if (in_stage > 60LL * 1000000) {
+            StopDance("safety timeout");
+        }
+        return;
+
+    case DanceStage::FollowUp: {
+        if (reminder_speech_pending_ || reminder_session_active_) {
+            ESP_LOGW(DANCE_TAG, "FOLLOW_UP skipped: a reminder goes first");
+            dance_stage_ = DanceStage::None;
+            return;
+        }
+        if (in_stage > 20LL * 1000000) {
+            ESP_LOGW(DANCE_TAG, "FOLLOW_UP skipped: device stayed busy");
+            dance_stage_ = DanceStage::None;
+            return;
+        }
+        // Give the RP2040 its final pose hold before the session starts.
+        if (in_stage < 1000000) return;
+        const bool ready = protocol_ != nullptr && device_state_ == kDeviceStateIdle &&
+                           wake_session_stage_ == WakeSessionStage::None &&
+                           !auto_awake_boot_pending_ && audio_service_.IsIdle();
+        if (!ready) return;
+        dance_stage_ = DanceStage::None;   // before StartDeviceSession -> Connecting
+        if (StartDeviceSession(kFollowUpCue)) {
+            ESP_LOGW(DANCE_TAG, "FOLLOW_UP: asking how the dance was");
+        } else {
+            dance_stage_ = DanceStage::FollowUp;
+        }
+        return;
+    }
+    }
+}
+#endif  // CONFIG_COGLET_DANCE
+
 void Application::AdvanceStaggeredWakeTick() {
     if (wake_session_stage_ != WakeSessionStage::Prepare &&
         wake_session_stage_ != WakeSessionStage::Settle) return;
@@ -1010,6 +1164,15 @@ void Application::SetDeviceState(DeviceState state) {
     }
     
     clock_ticks_ = 0;
+#if CONFIG_COGLET_DANCE
+    // Any wake (word, button, reminder) while dancing ends the dance.
+    if (dance_stage_ == DanceStage::Playing && state != kDeviceStateIdle) {
+        StopDance("device woke up");
+    } else if ((dance_stage_ == DanceStage::Starting || dance_stage_ == DanceStage::FollowUp) &&
+               state == kDeviceStateConnecting) {
+        StopDance("user woke Coglet");   // the user's own session replaces the follow-up
+    }
+#endif
     if (state == kDeviceStateIdle && wake_session_stage_ != WakeSessionStage::None) {
         CancelStaggeredWake();
     }

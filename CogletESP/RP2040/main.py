@@ -9,6 +9,7 @@ import math
 import animation
 from animation import servos
 from vision import EyeFollower
+import music
 
 ESP = UART(1, baudrate=115200, tx=Pin(4), rx=Pin(5))
 rx_buffer = b""
@@ -385,7 +386,7 @@ print(" Calibrate: GPIO20 active LOW")
 print(" Facetrack: GPIO21 active LOW; controls Grove Vision only")
 print(" Wiggle: GPIO12 active LOW, calibration-only +/-10 deg")
 print(" Vision: UART0 TX=GPIO0 RX=GPIO1 @ 921600")
-print(" Vision control: EYL + EYR only")
+print(" Vision: camera-in-eye tracker R18 (EYL/EYR + PIT, YAW handoff)")
 print("==============================================")
 
 if not servoclass.is_ready():
@@ -427,8 +428,26 @@ while True:
             # Explicit MCP one-shot/temporary actions are a separate UART
             # namespace from normal XiaoZhi expression states.  The RP2040
             # owns the requested action for exactly 2 seconds.
+            # Built-in music dance (ESP plays the matching track at the
+            # same moment).  "dance:stop" ends it early.
+            if rcvstate.startswith("dance:"):
+                dance_name = rcvstate[6:].strip().lower()
+                if dance_name == "stop":
+                    music.stop(now, "ESP stop")
+                elif mode.value() != 0:
+                    _enable_servo_outputs("dance {}".format(dance_name))
+                    animation._finish_mcp_action(now, "dance")
+                    animation.update_blink(now, animation.current_state, enabled=False)
+                    music.start(dance_name, now)
+                else:
+                    print("[DANCE] ignored during Calibration Mode")
+                continue
+
             if rcvstate.startswith("action:"):
                 action_name = rcvstate[7:].strip()
+                if music.active():
+                    print("[DANCE] MCP action ignored while dancing:", action_name)
+                    continue
                 _enable_servo_outputs("MCP action {}".format(action_name))
                 animation.start_mcp_action(action_name, now)
                 continue
@@ -467,7 +486,10 @@ while True:
                     # before entering a different normal state. This prevents
                     # temporary tuning from excited/silly/shock/etc. leaking
                     # into the next expression.
-                    animation.reset_servo_motion_defaults()
+                    # A running dance owns the motion limits; music.stop()
+                    # resets them and re-enters the latest state later.
+                    if not music.active():
+                        animation.reset_servo_motion_defaults()
 
                     animation.current_state = rcvstate
                     animation.new_state_flag = True
@@ -482,7 +504,11 @@ while True:
     # --- START TEMPORARY ANIMATION TEST OVERRIDE ---
     calibration_owns_servos = _update_calibration_wiggle(now)
     mcp_owns_servos = False
+    dance_owns_servos = False
 
+    # Calibration Mode always wins over a dance.
+    if calibration_owns_servos and music.active():
+        music.stop(now, "Calibration Mode")
 
     if calibration_owns_servos:
         if time.ticks_diff(now, last_toggle) >= 500:
@@ -508,9 +534,12 @@ while True:
         # / Vision for a fixed 2-second window.  update_mcp_action() returns
         # False on the exact loop where that window expires, so the newest
         # normal state resumes immediately without an extra dead frame.
-        mcp_owns_servos = animation.update_mcp_action(now)
+        # Dance > MCP action > State / Speaking / Blink / Vision.
+        dance_owns_servos = music.update(now)
+        if not dance_owns_servos:
+            mcp_owns_servos = animation.update_mcp_action(now)
 
-        if mcp_owns_servos:
+        if dance_owns_servos or mcp_owns_servos:
             # Keep background systems alive logically but prevent any of them
             # from issuing competing servo commands during MCP ownership.
             animation.update_blink(
@@ -563,7 +592,7 @@ while True:
     _update_sleep_torque_release(
         now,
         calibration_owns_servos,
-        mcp_owns_servos,
+        mcp_owns_servos or dance_owns_servos,
     )
 
     time.sleep_ms(1)

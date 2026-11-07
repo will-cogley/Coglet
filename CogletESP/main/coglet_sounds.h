@@ -26,7 +26,23 @@
 #  error "Please select a Coglet Reminder Sound in menuconfig"
 #endif
 
+#if CONFIG_COGLET_DANCE
+#  include "coglet_sounds/coglet_dance_mecha.h"
+#  include "coglet_sounds/coglet_dance_evil.h"
+#  include "coglet_sounds/coglet_dance_cat.h"
+#endif
+
 namespace CogletSounds {
+
+#if CONFIG_COGLET_DANCE
+// style: "mecha" | "evil" | "cat". Empty view for anything else.
+inline std::string_view Dance(std::string_view style) {
+    if (style == "mecha") return CogletDanceMecha::Ogg();
+    if (style == "evil") return CogletDanceEvil::Ogg();
+    if (style == "cat") return CogletDanceCat::Ogg();
+    return {};
+}
+#endif
 
 inline std::string_view Boot() {
 #if defined(CONFIG_COGLET_BOOT_SOUND_MECHA)

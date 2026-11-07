@@ -1,6 +1,7 @@
 #ifndef _APPLICATION_H_
 #define _APPLICATION_H_
 
+#include "sdkconfig.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 #include <freertos/task.h>
@@ -66,6 +67,11 @@ public:
     // Spoken reminder: the MCP tool self.coglet.reminder.last_due calls this
     // once the LLM has fetched the reminder text (any thread).
     void OnReminderTextDelivered() { reminder_text_delivered_ = true; }
+#if CONFIG_COGLET_DANCE
+    // MCP tool self.coglet.dance (any thread). style: mecha/evil/cat/random.
+    // Returns the resolved style, or "" if a dance is already in progress.
+    std::string RequestDance(const std::string& style);
+#endif
     bool UpgradeFirmware(Ota& ota, const std::string& url = "");
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
@@ -122,6 +128,25 @@ private:
     std::atomic<bool> reminder_text_delivered_{false};
     void UpdateReminderSpeech();
     void CloseReminderSession(const char* reason);
+
+#if CONFIG_COGLET_DANCE
+    // Music dance: ack reply -> close session -> track + RP2040 choreography
+    // -> device-initiated follow-up ("how was my dance?").
+    enum class DanceStage : uint8_t { None, WaitAck, Starting, Playing, FollowUp };
+    DanceStage dance_stage_ = DanceStage::None;
+    std::string dance_style_;
+    int64_t dance_stage_since_us_ = 0;
+    int64_t dance_ack_tts_stop_us_ = 0;
+    std::atomic<bool> dance_cancel_{false};
+    std::atomic<bool> dance_audio_done_{true};
+    std::atomic<bool> dance_task_running_{false};
+    void UpdateDance();
+    void BeginDancePlayback();
+    void StopDance(const char* reason);
+    bool DanceOwnsDevice() const {
+        return dance_stage_ == DanceStage::Starting || dance_stage_ == DanceStage::Playing;
+    }
+#endif
     // Non-blocking uplink retry gate (monotonic microseconds).
     int64_t audio_send_retry_after_us_ = 0;
     uint8_t audio_send_failure_streak_ = 0;
