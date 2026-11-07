@@ -888,6 +888,64 @@ menu "NMRobotics Coglet Dance"
             session by itself and asks how the dance was.
             Off: no tracks are linked and the tool is not registered.
 
+    config COGLET_MUSIC
+        bool "Custom songs from the Music folder"
+        depends on COGLET_DANCE
+        default y
+        help
+            Every audio file in CogletESP/Music/ (mp3, wav, flac, m4a, ogg,
+            or the audio of mp4/mov videos) is converted to Opus and
+            beat-analysed at build time, then compiled in. Coglet dances to
+            these songs with an automatic "energetic" or "calm" preset.
+            Force a preset or tempo with tags in the file name, e.g.
+            "My Song.calm.mp3" or "Drop.energetic.128bpm.wav".
+            Needs ffmpeg (with libopus) on the build computer; without it the
+            songs are skipped with a warning and the build continues.
+
+    config COGLET_MUSIC_FFMPEG
+        string "ffmpeg executable"
+        depends on COGLET_MUSIC
+        default "ffmpeg"
+        help
+            Name or full path of ffmpeg. Use forward slashes on Windows,
+            e.g. C:/ffmpeg/bin/ffmpeg.exe
+
+    config COGLET_MUSIC_MAX_SECONDS
+        int "Maximum length per song (seconds)"
+        depends on COGLET_MUSIC
+        range 10 300
+        default 60
+        help
+            Longer songs are cut here with a fade-out.
+
+    config COGLET_MUSIC_BITRATE_KBPS
+        int "Opus bitrate (kbps)"
+        depends on COGLET_MUSIC
+        range 16 64
+        default 32
+        help
+            32 kbps is ~240 KB per minute and sounds clean on Coglet's speaker.
+
+    config COGLET_MUSIC_MAX_KB
+        int "Flash budget for all custom songs (KB)"
+        depends on COGLET_MUSIC
+        range 100 2500
+        default 1500
+        help
+            Songs that do not fit are skipped with a warning. The app
+            partition is 4 MB; check the image size printed by idf.py build
+            before raising this.
+
+    config COGLET_MUSIC_BEAT_OFFSET_MS
+        int "Beat timing offset (ms)"
+        depends on COGLET_MUSIC
+        range -300 300
+        default 20
+        help
+            When a beat is sent to the RP2040 relative to the music:
+            speaker latency (~120 ms) minus the servo lead (~100 ms).
+            Moves late -> lower it; moves early -> raise it.
+
 endmenu
 
 # NMRobotics unified firmware: startup / reminder sound selection.

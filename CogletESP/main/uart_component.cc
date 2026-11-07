@@ -17,8 +17,20 @@ void uart_init_component() {
 }
 
 void uart_send_string(const char* str) {
-    uart_write_bytes(UART_PORT_NUM, str, strlen(str));
-    uart_write_bytes(UART_PORT_NUM, "\r\n", 2);}
+    // One write per line: uart_write_bytes() is atomic per call, so lines sent
+    // from different tasks (main loop, dance beat task) never interleave.
+    char buf[128];
+    const size_t len = strlen(str);
+    if (len + 2 <= sizeof(buf)) {
+        memcpy(buf, str, len);
+        buf[len] = '\r';
+        buf[len + 1] = '\n';
+        uart_write_bytes(UART_PORT_NUM, buf, len + 2);
+    } else {
+        uart_write_bytes(UART_PORT_NUM, str, len);
+        uart_write_bytes(UART_PORT_NUM, "\r\n", 2);
+    }
+}
 
 void uart_signal_start() {
     uart_send_string("[SPEAK_START]\n");

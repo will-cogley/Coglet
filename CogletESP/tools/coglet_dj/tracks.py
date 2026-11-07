@@ -301,4 +301,82 @@ def cat():
     return T
 
 
-TRACKS = {"mecha": mecha, "evil": evil, "cat": cat}
+# ======================================================================= SAD
+def sad():
+    """Solo piano, melancholic, 68 BPM, F minor.
+
+    i-VI-III-VII (Fm Db Ab Eb), then iv -> V (Bbm -> C) and home to Fm.
+    Left hand: low root + flowing 8th-note broken chords with the pedal down.
+    Right hand: an original singing melody. No drums, no synths.
+    """
+    T = S.Track(bpm=68, seconds=33.8)
+    rng = np.random.default_rng(11)
+    chords = {  # root (low octave), chord tones for the broken-chord pattern
+        "Fm": ("F2", ["F3", "C4", "Ab4"]), "Db": ("Db2", ["Db3", "Ab3", "F4"]),
+        "Ab": ("Ab2", ["Ab3", "Eb4", "C5"]), "Eb": ("Eb2", ["Eb3", "Bb3", "G4"]),
+        "Bbm": ("Bb1", ["Bb2", "F3", "Db4"]), "C": ("C2", ["C3", "G3", "E4"]),
+    }
+    plan = ["Fm", "Db", "Fm", "Db", "Ab", "Eb", "Bbm", "C", "Fm"]
+    melody = {   # bar -> [(beat, note, beats, velocity)]
+        2: [(0, "Ab4", 0.5, .55), (0.5, "C5", 0.5, .58), (1, "F5", 2, .66), (3, "Eb5", 0.5, .55), (3.5, "C5", 0.5, .52)],
+        3: [(0, "Db5", 1.5, .6), (1.5, "C5", 0.5, .52), (2, "Ab4", 2, .5)],
+        4: [(0, "C5", 0.5, .58), (0.5, "Eb5", 0.5, .62), (1, "Ab5", 1.5, .72), (2.5, "G5", 0.5, .6), (3, "F5", 0.5, .58), (3.5, "Eb5", 0.5, .55)],
+        5: [(0, "Eb5", 1, .62), (1, "Db5", 0.5, .55), (1.5, "C5", 0.5, .52), (2, "Bb4", 2, .5)],
+        6: [(0, "Db5", 0.5, .7), (0.5, "F5", 0.5, .74), (1, "Bb5", 1.5, .85), (2.5, "Ab5", 0.5, .72), (3, "F5", 1, .7)],
+        7: [(0, "E5", 1, .78), (1, "G5", 0.5, .8), (1.5, "F5", 0.5, .7), (2, "E5", 1, .68), (3, "C5", 1, .6)],
+    }
+    pattern = (0, 1, 2, 1, 2, 1, 0, 1)        # indices into chord tones, 8ths
+
+    def hum(t, amount=0.012):                  # tiny human timing
+        return t + rng.uniform(-amount, amount)
+
+    def play(t, name, beats, vel, bus="keys"):
+        T.add(bus, hum(t), S.grand(N(name) if isinstance(name, str) else name, beats * T.beat, vel), 1.0)
+
+    for bar, cname in enumerate(plan):
+        if bar == 0:
+            T.mark(T.t(0), "section", "intro")
+        elif bar == 2:
+            T.mark(T.t(2), "section", "verse")
+        elif bar == 6:
+            T.mark(T.t(6), "section", "climax")
+        elif bar == 8:
+            T.mark(T.t(8), "section", "outro")
+        root, tones = chords[cname]
+        T.mark(T.t(bar), "bar", bar)
+        T.mark(T.t(bar), "chord", cname)
+        climax = bar in (6, 7)
+        lh = 0.42 + (0.15 if climax else 0.0) - (0.08 if bar < 2 else 0.0)
+
+        if bar == 8:
+            # final: rolled Fm chord, slight ritardando, let it ring
+            roll = ["F1", "F2", "C3", "F3", "Ab3", "C4", "F4"]
+            t0 = T.t(8) + 0.12
+            for i, n_ in enumerate(roll):
+                play(t0 + i * 0.06, n_, 6, 0.5 - 0.02 * i)
+            play(t0 + 0.5, "F5", 6, 0.55)
+            play(t0 + 0.5, "C5", 6, 0.4)
+            T.mark(t0, "end")
+            break
+
+        play(T.t(bar), N(root), 4, lh + 0.1)
+        if climax:
+            play(T.t(bar), N(root) + 12, 4, lh)       # octave bass
+        for i, idx in enumerate(pattern):
+            v = lh * (1.0 if i % 2 == 0 else 0.82)
+            play(T.t(bar, i * 0.5), N(tones[idx]), 1.2, v)
+        for b in range(4):
+            T.mark(T.t(bar, b), "beat", b)
+
+        for beat, n_, ln, v in melody.get(bar, ()):
+            play(T.t(bar, beat), n_, ln, v)
+            if climax:                              # octave below, softer
+                play(T.t(bar, beat), N(n_) - 12, ln, v * 0.55)
+            T.mark(T.t(bar, beat), "note", N(n_))
+
+    T.reverb = {"keys": 0.32}
+    T.glue = 1.2           # keep the piano dynamics (less limiting)
+    T.gains = {"keys": 0.9}
+    return T
+
+TRACKS = {"mecha": mecha, "evil": evil, "cat": cat, "sad": sad}

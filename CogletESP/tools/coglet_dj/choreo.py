@@ -122,6 +122,40 @@ def choreography(name, T):
                 add(t, "ears")
                 add(t, "eyes", "split")
 
+        elif name == "sad":
+            if kind == "kick":
+                if sec == "drop":
+                    add(t, "nod", "small")
+            elif kind == "snare":
+                if sec == "build":
+                    add(t, "ears")
+                else:
+                    add(t, "nod", "heavy")
+                    add(t, "ears_down")
+                    if sec == "drop":
+                        add(t, "blink")
+            elif kind == "roll":
+                # hat roll: ears flutter left-right
+                for k in range(4):
+                    add(t + k * beat / 4, "ear_L" if k % 2 == 0 else "ear_R")
+            elif kind == "bar":
+                if sec in ("intro", "verse"):
+                    add(t, "sway_L" if sway_dir > 0 else "sway_R", "slow")
+                    if sec == "intro" and value % 2 == 0:
+                        add(t, "head_roll", "slow")
+                    sway_dir = -sway_dir
+                elif sec == "drop":
+                    add(t, "sway_L" if sway_dir > 0 else "sway_R")
+                    add(t, "turn_L" if sway_dir > 0 else "turn_R")
+                    sway_dir = -sway_dir
+            elif kind == "breath":
+                add(t, "eyes_squint")
+            elif kind == "hit":
+                add(t, "eyes_wide")
+                add(t, "ears")
+                add(t, "mouth_open")
+                add(t, "eyes", "split")
+
     # ------------------------------------------------ beat-grid moves
     n_beats = int(end_t / beat + 1e-6)
     eye_dir = 1
@@ -186,6 +220,31 @@ def choreography(name, T):
                 add(off, "ear_L" if b % 2 == 0 else "ear_R")
                 if b == 3:
                     add(t, "blink")
+            elif sec == "outro":
+                if b == 0:
+                    add(t, "eyes", "C")
+
+        elif name == "sad":
+            if sec == "intro":
+                if b == 0 or b == 2:
+                    add(t, "eyes", "L" if eye_dir > 0 else "R"); eye_dir = -eye_dir
+                if b == 3:
+                    add(t, "blink")
+            elif sec == "verse":
+                if b % 2 == 0:
+                    add(t, "eyes", "L" if eye_dir > 0 else "R"); eye_dir = -eye_dir
+                if b == 3:
+                    add(t, "blink")
+            elif sec == "build":
+                if bar == 9:
+                    add(t, "eyes", "cross" if b % 2 == 0 else "split")
+                elif b in (0, 2):
+                    add(t, "eyes", "L" if eye_dir > 0 else "R"); eye_dir = -eye_dir
+            elif sec == "drop":
+                if bar in (14, 15):                # climax: eyes in opposite directions
+                    add(t, "eyes", "cross" if b % 2 == 0 else "split")
+                else:
+                    add(t, "eyes", "L" if eye_dir > 0 else "R"); eye_dir = -eye_dir
             elif sec == "outro":
                 if b == 0:
                     add(t, "eyes", "C")

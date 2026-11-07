@@ -903,6 +903,18 @@ std::string Application::RequestDance(const std::string& style) {
     }
     static const char* const kStyles[] = {"mecha", "evil", "cat"};
     std::string resolved = style;
+#if CONFIG_COGLET_MUSIC
+    dance_song_ = nullptr;
+    if (CogletMusic::kSongCount > 0 &&
+        (style == "mine" || style == "my" || style == "custom" || style == "random_custom")) {
+        dance_song_ = &CogletMusic::kSongs[esp_random() % CogletMusic::kSongCount];
+    } else if (CogletSounds::Dance(style).empty()) {
+        dance_song_ = CogletMusic::FindLoose(style);
+    }
+    if (dance_song_ != nullptr) {
+        resolved = dance_song_->name;
+    } else
+#endif
     if (CogletSounds::Dance(resolved).empty()) {
         resolved = kStyles[esp_random() % 3];   // "random" or anything unknown
     }
@@ -918,6 +930,15 @@ void Application::BeginDancePlayback() {
     if (dance_task_running_) {
         return;   // previous feeder still exiting; retry next tick
     }
+#if CONFIG_COGLET_MUSIC
+    if (dance_beats_running_) {
+        return;
+    }
+    if (dance_song_ != nullptr) {
+        BeginSongPlayback();
+        return;
+    }
+#endif
     dance_cancel_ = false;
     dance_audio_done_ = false;
     dance_task_running_ = true;
@@ -943,6 +964,83 @@ void Application::BeginDancePlayback() {
     dance_stage_since_us_ = esp_timer_get_time();
     ESP_LOGW(DANCE_TAG, "PLAY %s (RP2040 choreography started)", dance_style_.c_str());
 }
+
+#if CONFIG_COGLET_MUSIC
+// Custom song: play the Ogg and stream its beats to the RP2040 groove engine.
+//   "groove:<calm|energetic>:<bpm>"  start (sent with the first audio packet)
+//   "gb:<strength><energy><bar>"     one beat, three digits, e.g. "gb:751"
+//   "groove:end"                     after the last beat, once the audio ended
+void Application::BeginSongPlayback() {
+    const CogletMusic::Song* song = dance_song_;
+    dance_cancel_ = false;
+    dance_audio_done_ = false;
+    dance_task_running_ = true;
+    dance_beats_running_ = true;
+    audio_service_.ResetDecoder();
+
+    char command[48];
+    snprintf(command, sizeof(command), "groove:%s:%u", song->PresetName(), static_cast<unsigned>(song->bpm));
+    uart_send_string(command);
+    dance_play_start_us_ = esp_timer_get_time();
+
+    BaseType_t ok = xTaskCreate([](void* arg) {
+        auto* app = static_cast<Application*>(arg);
+        app->audio_service_.PlaySound(app->dance_song_->Ogg(), &app->dance_cancel_);
+        app->dance_audio_done_ = true;
+        app->dance_task_running_ = false;
+        vTaskDelete(nullptr);
+    }, "coglet_dance", 4096, this, 3, nullptr);
+    BaseType_t ok_beats = ok == pdPASS ? xTaskCreate([](void* arg) {
+        auto* app = static_cast<Application*>(arg);
+        const CogletMusic::Song* s = app->dance_song_;
+        const int64_t start = app->dance_play_start_us_;
+        const int64_t offset_us = static_cast<int64_t>(CONFIG_COGLET_MUSIC_BEAT_OFFSET_MS) * 1000;
+        char line[12];
+        for (size_t i = 0; i < s->beat_count && !app->dance_cancel_; ++i) {
+            const CogletMusic::Beat& b = s->beats[i];
+            const int64_t due = start + static_cast<int64_t>(b.t_ms) * 1000 + offset_us;
+            while (!app->dance_cancel_) {
+                const int64_t wait_us = due - esp_timer_get_time();
+                if (wait_us <= 5000) break;                    // close enough: send now
+                TickType_t ticks = pdMS_TO_TICKS(wait_us > 20000 ? 20 : wait_us / 1000);
+                vTaskDelay(ticks > 0 ? ticks : 1);
+            }
+            if (app->dance_cancel_) break;
+            snprintf(line, sizeof(line), "gb:%u%u%u", b.strength % 10, b.energy % 10, b.flags & 1);
+            uart_send_string(line);
+        }
+        // Let the music finish (fade-out) before handing the servos back.
+        while (!app->dance_cancel_ && !app->dance_audio_done_) {
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+        if (!app->dance_cancel_) {
+            uart_send_string("groove:end");
+        }
+        app->dance_beats_running_ = false;
+        vTaskDelete(nullptr);
+    }, "coglet_beats", 3072, this, 4, nullptr) : pdFAIL;
+
+    if (ok != pdPASS || ok_beats != pdPASS) {
+        ESP_LOGE(DANCE_TAG, "could not start the song tasks");
+        dance_cancel_ = true;
+        if (ok != pdPASS) {
+            dance_task_running_ = false;
+            dance_audio_done_ = true;
+        }
+        if (ok_beats != pdPASS) {
+            dance_beats_running_ = false;
+        }
+        audio_service_.ResetDecoder();
+        uart_send_string("dance:stop");
+        dance_stage_ = DanceStage::None;
+        return;
+    }
+    dance_stage_ = DanceStage::Playing;
+    dance_stage_since_us_ = esp_timer_get_time();
+    ESP_LOGW(DANCE_TAG, "PLAY song \"%s\" (%s, %u BPM, %u beats)", song->name, song->PresetName(),
+             static_cast<unsigned>(song->bpm), static_cast<unsigned>(song->beat_count));
+}
+#endif
 
 void Application::StopDance(const char* reason) {
     const bool was_playing = dance_stage_ == DanceStage::Playing;
@@ -994,15 +1092,24 @@ void Application::UpdateDance() {
         }
         return;
 
-    case DanceStage::Playing:
-        if (dance_audio_done_ && audio_service_.IsIdle()) {
+    case DanceStage::Playing: {
+        bool beats_done = true;
+        int64_t limit_us = 60LL * 1000000;
+#if CONFIG_COGLET_MUSIC
+        beats_done = !dance_beats_running_;
+        if (dance_song_ != nullptr) {
+            limit_us = static_cast<int64_t>(dance_song_->duration_ms) * 1000 + 30LL * 1000000;
+        }
+#endif
+        if (dance_audio_done_ && beats_done && audio_service_.IsIdle()) {
             ESP_LOGW(DANCE_TAG, "FINISHED %s: follow-up session next", dance_style_.c_str());
             dance_stage_ = DanceStage::FollowUp;
             dance_stage_since_us_ = now;
-        } else if (in_stage > 60LL * 1000000) {
+        } else if (in_stage > limit_us) {
             StopDance("safety timeout");
         }
         return;
+    }
 
     case DanceStage::FollowUp: {
         if (reminder_speech_pending_ || reminder_session_active_) {

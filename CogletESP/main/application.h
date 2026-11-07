@@ -2,6 +2,9 @@
 #define _APPLICATION_H_
 
 #include "sdkconfig.h"
+#if CONFIG_COGLET_MUSIC
+#include "coglet_music.h"
+#endif
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 #include <freertos/task.h>
@@ -140,8 +143,17 @@ private:
     std::atomic<bool> dance_cancel_{false};
     std::atomic<bool> dance_audio_done_{true};
     std::atomic<bool> dance_task_running_{false};
+#if CONFIG_COGLET_MUSIC
+    // Custom song from the Music folder (nullptr = built-in track).
+    const CogletMusic::Song* dance_song_ = nullptr;
+    int64_t dance_play_start_us_ = 0;
+    std::atomic<bool> dance_beats_running_{false};
+#endif
     void UpdateDance();
     void BeginDancePlayback();
+#if CONFIG_COGLET_MUSIC
+    void BeginSongPlayback();
+#endif
     void StopDance(const char* reason);
     bool DanceOwnsDevice() const {
         return dance_stage_ == DanceStage::Starting || dance_stage_ == DanceStage::Playing;

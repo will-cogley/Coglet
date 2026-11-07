@@ -34,7 +34,7 @@ def mixdown(T):
         if name in getattr(T, "reverb", {}):
             x = S.reverb(x, wet=T.reverb[name])
         mix += x * T.gains.get(name, 1.0)
-    return S.master(mix)
+    return S.master(mix, glue=getattr(T, "glue", 1.6))
 
 
 def loudness_report(x, sr):

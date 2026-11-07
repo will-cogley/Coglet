@@ -299,6 +299,105 @@ def nya(midi, length=0.35):
     return x * env_adsr(n, 0.02, 0.1, 0.7, 0.1, length * 0.7) * 0.7
 
 
+# ------------------------------------------------------------------ sad / lo-fi
+def piano(midi, length=1.5, bright=1.0, tau=0.9):
+    """Soft felt-ish piano: inharmonic partials with faster decay up high."""
+    n = int((length + 0.4) * SR)
+    t = np.arange(n) / SR
+    f = midi_hz(midi)
+    out = np.zeros(n)
+    B = 0.0004                                   # string stiffness (inharmonicity)
+    for k in range(1, 12):
+        fk = f * k * np.sqrt(1 + B * k * k)
+        if fk > 9000:
+            break
+        amp = (1.0 / k ** 1.25) * (bright if k > 3 else 1.0)
+        out += amp * np.sin(2 * np.pi * fk * t + RNG.uniform(0, 6.28)) * np.exp(-t * (1 + 0.6 * k) / (tau * 2))
+    hammer = bandpass(noise(n), 1500, 5000) * env_exp(n, 0.006) * 0.08
+    rel = np.ones(n)
+    off = int(length * SR)
+    rel[off:] = np.linspace(1, 0, n - off) ** 2
+    att = np.minimum(1, t / 0.004)
+    return (out * 0.35 + hammer) * rel * att
+
+
+def bass808(midi, length, glide_from=None, glide_time=0.09, drive=2.2):
+    """Long 808 with optional pitch glide; saturated so it reads on small speakers."""
+    n = int((length + 0.05) * SR)
+    t = np.arange(n) / SR
+    f1 = midi_hz(midi)
+    if glide_from is not None:
+        f0 = midi_hz(glide_from)
+        f = f1 + (f0 - f1) * np.exp(-t / (glide_time / 3))
+    else:
+        f = f1 * (1 + 0.6 * np.exp(-t / 0.012))     # small pitch punch
+    x = np.sin(2 * np.pi * np.cumsum(f) / SR)
+    x = soft_clip(x * 1.0, drive)
+    env = np.exp(-t / max(length * 0.9, 0.2))
+    off = int(length * SR)
+    env[off:] *= np.linspace(1, 0, n - off)
+    return x * env * np.minimum(1, t / 0.003) * 0.9
+
+
+def vinyl(length, density=9.0):
+    """Quiet tape hiss + random crackles."""
+    n = int(length * SR)
+    x = lowpass(noise(n), 6000) * 0.04
+    k = int(length * density)
+    for i in RNG.integers(0, n - 200, k):
+        x[i:i + 60] += RNG.uniform(-1, 1) * env_exp(60, 0.0004) * RNG.uniform(0.2, 0.6)
+    return x
+
+
+def swell(x):
+    """Reverse-envelope a sound (piano swell into a section)."""
+    return x[::-1] * np.linspace(0, 1, len(x)) ** 2
+
+
+def grand(midi, length=2.0, vel=0.7, pedal=True):
+    """Acoustic-ish grand piano note.
+
+    3 slightly detuned strings per note (beating / chorus), stretched
+    inharmonic partials, two-stage decay (prompt + aftersound), velocity-
+    dependent brightness, felt-hammer thump and a short soundboard body.
+    """
+    f0 = midi_hz(midi)
+    ring = 6.0 if pedal else 0.6
+    n = int((length + (1.5 if pedal else 0.25)) * SR)
+    t = np.arange(n) / SR
+    B = 0.00012 * 2 ** ((midi - 60) / 12)              # more stiffness up high
+    # base decay: low notes ring longer
+    tau0 = np.clip(ring * 2 ** (-(midi - 48) / 24), 0.6, 9.0)
+    out = np.zeros(n)
+    detune = ((0.0, 1.0), (+0.00045, 0.8), (-0.0005, 0.75)) if midi > 40 else ((0.0, 1.0), (+0.0004, 0.8))
+    bright = 0.35 + 0.65 * vel
+    for k in range(1, 20):
+        fk = f0 * k * np.sqrt(1 + B * k * k)
+        if fk > 7000:
+            break
+        # hammer striking ~1/8 of the string: soft notch near k=8
+        amp = (1.0 / k ** (2.2 - 1.2 * bright)) * (0.4 + 0.6 * abs(np.sin(np.pi * k / 8.3)))
+        tau_fast = tau0 * 0.18 / (1 + 0.25 * k)
+        tau_slow = tau0 / (1 + 0.12 * k * k / bright)
+        env = 0.65 * np.exp(-t / tau_fast) + 0.35 * np.exp(-t / tau_slow)
+        for d, w in detune:
+            out += w * amp * env * np.sin(2 * np.pi * fk * (1 + d) * t + RNG.uniform(0, 6.28))
+    out /= sum(w for _, w in detune)
+    thump = bandpass(noise(n), 120, 500 + 700 * vel) * env_exp(n, 0.008) * 0.06 * vel
+    knock = bandpass(noise(n), 2000, 6000) * env_exp(n, 0.002) * 0.05 * vel
+    x = out * 0.5 + thump + knock
+    # soundboard body: two gentle resonances
+    x = x + 0.25 * bandpass(x, 180, 450) + 0.12 * bandpass(x, 900, 2200)
+    # damper: release after note-off (or after pedal lift)
+    off = int(length * SR)
+    if off < n:
+        rel = np.ones(n)
+        rel[off:] = np.exp(-np.arange(n - off) / SR / (0.35 if pedal else 0.08))
+        x *= rel
+    x *= np.minimum(1, t / 0.0015)
+    return x * (0.25 + 0.75 * vel)
+
+
 # ------------------------------------------------------------------ fx / mix
 def reverb(x, wet=0.25, room=0.82, damp=3500, predelay=0.012):
     """Schroeder/Freeverb-style reverb with lfilter combs + allpasses."""
@@ -349,7 +448,7 @@ def sidechain(x, kick_times, depth=0.6, release=0.18):
     return x * g
 
 
-def master(mix, target_peak=0.85, hp=140):
+def master(mix, target_peak=0.85, hp=140, glue=1.6):
     """Mastering for a small speaker: high-pass, glue, soft limit, normalise.
 
     The Coglet speaker cannot reproduce much below ~150 Hz; energy there only
@@ -360,7 +459,7 @@ def master(mix, target_peak=0.85, hp=140):
     # gentle presence boost (speaker sounds thin below ~400 Hz anyway)
     x = x + 0.25 * bandpass(x, 1500, 4500)
     x = x / (np.max(np.abs(x)) + 1e-9)
-    x = soft_clip(x * 1.6, 1.4)          # glue / loudness
+    x = soft_clip(x * glue, 1.4)         # glue / loudness
     x = x / (np.max(np.abs(x)) + 1e-9) * target_peak
     fade = int(0.02 * SR)
     x[:fade] *= np.linspace(0, 1, fade)

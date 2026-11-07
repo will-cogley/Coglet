@@ -707,11 +707,47 @@ if(CONFIG_IDF_TARGET_ESP32)
                              )
 endif()
 
+# ---- NMRobotics Coglet: custom dance songs from the Music folder ----------
+# Every audio file in CogletESP/Music/ is converted (ffmpeg -> Ogg/Opus) and
+# beat-analysed by tools/coglet_music/build_music.py into one generated C++
+# source. The script runs on every build but caches each song, and it only
+# rewrites the source when the songs changed (BYPRODUCTS => Ninja "restat"),
+# so an unchanged Music folder costs a fraction of a second and no recompile.
+# Song file names never appear in the Ninja file (safe for non-ASCII names).
+if(CONFIG_COGLET_DANCE AND CONFIG_COGLET_MUSIC AND NOT CMAKE_BUILD_EARLY_EXPANSION)
+    idf_build_get_property(coglet_project_dir PROJECT_DIR)
+    idf_build_get_property(coglet_python PYTHON)
+    set(COGLET_MUSIC_OUT "${CMAKE_BINARY_DIR}/coglet_music")
+    set(COGLET_MUSIC_SRC "${COGLET_MUSIC_OUT}/coglet_music_data.cc")
+    set(COGLET_MUSIC_CMD
+        ${coglet_python} "${coglet_project_dir}/tools/coglet_music/build_music.py"
+        --src "${coglet_project_dir}/Music"
+        --out "${COGLET_MUSIC_OUT}"
+        --ffmpeg "${CONFIG_COGLET_MUSIC_FFMPEG}"
+        --max-seconds ${CONFIG_COGLET_MUSIC_MAX_SECONDS}
+        --bitrate ${CONFIG_COGLET_MUSIC_BITRATE_KBPS}
+        --max-kb ${CONFIG_COGLET_MUSIC_MAX_KB})
+    if(NOT EXISTS "${COGLET_MUSIC_SRC}")
+        execute_process(COMMAND ${COGLET_MUSIC_CMD})
+    endif()
+    add_custom_target(coglet_music ALL
+        COMMAND ${COGLET_MUSIC_CMD}
+        BYPRODUCTS "${COGLET_MUSIC_SRC}"
+        COMMENT "Coglet: checking the Music folder"
+        VERBATIM)
+    set_source_files_properties("${COGLET_MUSIC_SRC}" PROPERTIES GENERATED TRUE)
+    list(APPEND SOURCES "${COGLET_MUSIC_SRC}")
+endif()
+
 idf_component_register(SRCS ${SOURCES}
                     EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
                     WHOLE_ARCHIVE
                     )
+
+if(TARGET coglet_music)
+    add_dependencies(${COMPONENT_LIB} coglet_music)
+endif()
 
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME
 # If BOARD_NAME is empty, use BOARD_TYPE

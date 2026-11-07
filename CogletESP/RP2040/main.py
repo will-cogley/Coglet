@@ -443,6 +443,24 @@ while True:
                     print("[DANCE] ignored during Calibration Mode")
                 continue
 
+            # Custom song from the Music folder: beats are streamed live.
+            if rcvstate.startswith("gb:"):
+                music.groove_beat(rcvstate[3:].strip(), now)
+                continue
+            if rcvstate.startswith("groove:"):
+                parts = rcvstate.strip().split(":")
+                if parts[1:2] == ["end"]:
+                    music.groove_end(now)
+                elif mode.value() != 0:
+                    _enable_servo_outputs("groove {}".format(parts[1] if len(parts) > 1 else "?"))
+                    animation._finish_mcp_action(now, "groove")
+                    animation.update_blink(now, animation.current_state, enabled=False)
+                    bpm = parts[2] if len(parts) > 2 else "?"
+                    music.start_groove(parts[1] if len(parts) > 1 else "calm", bpm, now)
+                else:
+                    print("[DANCE] ignored during Calibration Mode")
+                continue
+
             if rcvstate.startswith("action:"):
                 action_name = rcvstate[7:].strip()
                 if music.active():

@@ -131,6 +131,11 @@ class _PCA9685:
             data
         )
 
+    def full_off(self, channel):
+        """Stop the PWM pulses of one channel (servo goes limp, no holding torque)."""
+        reg = self.LED0_ON_L + channel * 4
+        self.i2c.writeto_mem(self.address, reg, bytes((0, 0, 0, 0x10)))
+
     def write_us(self, channel, pulse_us):
         pulse_us = clamp(
             float(pulse_us),
@@ -235,6 +240,8 @@ class Servo:
         self.vel_tolerance = 1.0
 
         self.enabled = enabled
+        # release(): this channel outputs no pulses until hold() is called.
+        self.released = False
 
         # Preload 90 degrees while nOE remains disabled.
         self._write_pwm(self.pos)
@@ -347,8 +354,21 @@ class Servo:
 
         self._write_pwm(self.pos)
 
+    def release(self):
+        """Release this servo's holding torque (other servos keep running)."""
+        self.released = True
+        if _ready:
+            _pca.full_off(self.channel)
+
+    def hold(self):
+        """Undo release(): drive the servo again at its current position."""
+        if self.released:
+            self.released = False
+            self.vel = 0.0
+            self._write_pwm(self.pos)
+
     def _write_pwm(self, angle):
-        if not _ready:
+        if not _ready or self.released:
             return
 
         # Preserve V1 pulse mapping:

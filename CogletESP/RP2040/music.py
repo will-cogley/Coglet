@@ -1,7 +1,12 @@
 # Coglet dance player (MicroPython / RP2040)
 #
 # ESP -> UART:  "dance:mecha" | "dance:evil" | "dance:cat"   start a dance
-#               "dance:stop"                                    stop now
+#               "dance:stop"                                    stop now (any mode)
+#
+# Custom songs from the Music folder (groove mode, beats streamed live):
+#               "groove:<energetic|calm>:<bpm>"   start
+#               "gb:<strength><energy><bar>"      one beat, e.g. "gb:751"
+#               "groove:end"                      song finished
 #
 # The ESP starts the matching built-in track at the same moment it sends the
 # command. The choreography (dance_data.py) is generated from the same score
@@ -86,6 +91,7 @@ CROUCH_LID_DEG = 20
 
 _dance = {
     "name": None,
+    "mode": "track",   # "track" (built-in choreography) | "groove" (streamed beats)
     "start_ms": 0,
     "index": 0,
     "moves": (),
@@ -168,6 +174,10 @@ def stop(now, reason="stop"):
     _dance["name"] = None
     _dance["returns"] = {}
     _dance["sequence"] = []
+    _dance["mode"] = "track"
+    # Servos released by the calm groove get their torque back.
+    for servo in servos.values():
+        servo.hold()
     # Hand control back: restore declared motion limits and make the current
     # XiaoZhi state re-apply its pose on the next loop.
     animation.reset_servo_motion_defaults()
@@ -261,27 +271,193 @@ def _do_move(move, arg, now):
         print("[DANCE] unknown move:", move)
 
 
-def update(now):
-    """Run the dance. Returns True while the dance owns the servos."""
-    if not active():
-        return False
+# ====================================================================== groove
+# Presets for custom songs. The ESP sends each beat already compensated for
+# speaker latency (menuconfig: COGLET_MUSIC_BEAT_OFFSET_MS), so moves start
+# the moment a beat arrives.
+GROOVES = {
+    "energetic": {
+        "base": {"YAW": 90, "ROL": 90, "PIT": 45, "MOU": 150, "LID": 150,
+                 "EYL": 90, "EYR": 90, "EAL": 110, "EAR": 90},
+        "motion": {"PIT": (650, 7000), "ROL": (450, 3000), "YAW": (400, 1800),
+                   "EAL": (750, 9000), "EAR": (750, 9000), "LID": (900, 9000),
+                   "MOU": (2000, 10000), "EYL": (700, 9000), "EYR": (700, 9000)},
+        "nod": {"small": (10, 110)},
+        "sway": 18,
+        "turn": 22,
+        "gaze": 28,
+        "release": (),
+        "pose_end": {"YAW": 90, "ROL": 100, "PIT": 32, "MOU": 150, "LID": 150,
+                     "EAL": 72, "EAR": 118},
+    },
+    "calm": {
+        # Ears, head and base only; small, slow moves on the felt pulse.
+        "base": {"YAW": 90, "ROL": 90, "PIT": 55, "MOU": 150,
+                 "EAL": 125, "EAR": 75},
+        "motion": {"PIT": (110, 500), "ROL": (45, 220), "YAW": (35, 160),
+                   "EAL": (160, 1200), "EAR": (160, 1200), "MOU": (300, 2000)},
+        "nod": {"small": (5, 300)},
+        "sway": 7,
+        "turn": 6,
+        "gaze": 0,
+        # Eyelid and both eye servos go limp for the whole song.
+        "release": ("LID", "EYL", "EYR"),
+        "pose_end": {"YAW": 90, "ROL": 97, "PIT": 64, "MOU": 150,
+                     "EAL": 140, "EAR": 55},
+    },
+}
+GROOVE_SILENCE_MS = 4000      # no beat for this long -> finish on our own
 
-    t = _music_time(now)
-    moves = _dance["moves"]
-    while _dance["index"] < len(moves) and moves[_dance["index"]][0] <= t:
-        _, move, arg = moves[_dance["index"]]
-        _dance["index"] += 1
-        _do_move(move, arg, now)
 
-    # Returns from short pulses.
+def start_groove(preset, bpm, now):
+    style = GROOVES.get(preset)
+    if style is None:
+        print("[DANCE] unknown groove preset:", preset)
+        style = GROOVES["calm"]
+        preset = "calm"
+    if active():
+        stop(now, "restart")
+    _dance["name"] = "groove-" + preset
+    _dance["mode"] = "groove"
+    _dance["start_ms"] = now
+    _dance["index"] = 0
+    _dance["moves"] = ()
+    _dance["duration_ms"] = 0
+    _dance["style"] = style
+    _dance["held"] = {}
+    _dance["returns"] = {}
+    _dance["sequence"] = []
+    _dance["end_at"] = None
+    _dance["beat"] = 0
+    _dance["bars"] = 0
+    _dance["last_beat_ms"] = now
+    _dance["dirs"] = {"sway": 1, "turn": 1, "ear": 1, "eye": 1}
+    _apply_motion(style)
+    for servo_name in style["release"]:
+        servos[servo_name].release()
+    for servo_name, angle in style["base"].items():
+        _hold(servo_name, angle)
+    print("[DANCE] GROOVE START {} ({} BPM){}".format(
+        preset, bpm, " released: " + ",".join(style["release"]) if style["release"] else ""))
+    return True
+
+
+def groove_beat(code, now):
+    """code: 3 digits from the ESP: accent strength, section energy, bar start."""
+    if not active() or _dance["mode"] != "groove" or _dance["end_at"] is not None:
+        return
+    try:
+        strength = int(code[0])
+        energy = int(code[1])
+        bar = code[2] == "1"
+    except (IndexError, ValueError):
+        return
+    _dance["last_beat_ms"] = now
+    _dance["beat"] += 1
+    if _dance["name"] == "groove-energetic":
+        _groove_energetic(strength, energy, bar, now)
+    else:
+        _groove_calm(strength, energy, bar, now)
+
+
+def _flip(key):
+    d = _dance["dirs"]
+    d[key] = -d[key]
+    return d[key]
+
+
+def _groove_energetic(strength, energy, bar, now):
+    style = _dance["style"]
+    base = style["base"]
+    held = _dance["held"]
+    n = _dance["beat"]
+    loud = 0.55 + 0.05 * energy                     # 0.55 (quiet) .. 1.0 (chorus)
+
+    # Head bob on every beat, deeper on accents.
+    depth = (6 + 1.4 * strength) * loud
+    _pulse("PIT", held["PIT"] + depth, 110, now)
+
+    # Ears: both on strong accents, alternating otherwise.
+    if strength >= 7:
+        _pulse("EAL", held["EAL"] - EAR_FLICK_DEG, EAR_FLICK_MS, now)
+        _pulse("EAR", held["EAR"] + EAR_FLICK_DEG, EAR_FLICK_MS, now)
+    elif energy >= 3:
+        if _flip("ear") > 0:
+            _pulse("EAL", held["EAL"] - EAR_FLICK_DEG, EAR_FLICK_MS, now)
+        else:
+            _pulse("EAR", held["EAR"] + EAR_FLICK_DEG, EAR_FLICK_MS, now)
+
+    # Body: sway every bar, turn as well once the song is up.
+    if bar:
+        side = _flip("sway")
+        _hold("ROL", base["ROL"] + side * style["sway"] * loud)
+        if energy >= 5:
+            _hold("YAW", base["YAW"] + _flip("turn") * style["turn"] * loud)
+        elif energy <= 2:
+            _hold("YAW", base["YAW"])
+
+    # Eyes: on every beat in loud parts, every bar in quiet ones.
+    if energy >= 8 and strength >= 8 and n % 4 == 0:
+        side = 1 if (n // 4) % 2 else -1
+        _pulse("EYL", base["EYL"] + side * style["gaze"], EYE_CROSS_MS, now)
+        _pulse("EYR", base["EYR"] - side * style["gaze"], EYE_CROSS_MS, now)
+    elif energy >= 5 or bar:
+        side = _flip("eye")
+        _hold("EYL", base["EYL"] + side * style["gaze"] * loud)
+        _hold("EYR", base["EYR"] + side * style["gaze"] * loud)
+
+    # Blink now and then; open the mouth on the biggest hits.
+    if n % 8 == 5:
+        _pulse("LID", 105, BLINK_MS, now)
+    if strength == 9 and energy >= 8 and n % 8 == 0:
+        _pulse("MOU", MOUTH_OPEN_ANGLE, 300, now)
+
+
+def _groove_calm(strength, energy, bar, now):
+    style = _dance["style"]
+    base = style["base"]
+    held = _dance["held"]
+    n = _dance["beat"]
+    soft = 0.7 + 0.03 * energy                      # 0.7 .. ~1.0
+
+    # A gentle nod on every felt beat; it sinks slowly and comes back up.
+    depth, hold_ms = style["nod"]["small"]
+    _pulse("PIT", held["PIT"] + (depth + 0.3 * strength) * soft, hold_ms, now)
+
+    # Ears drift a little every other beat.
+    if n % 2 == 0:
+        if _flip("ear") > 0:
+            _pulse("EAL", held["EAL"] - 14, 380, now)
+        else:
+            _pulse("EAR", held["EAR"] + 14, 380, now)
+
+    # Lean side to side once a bar; turn the base every other bar.
+    if bar:
+        _dance["bars"] = _dance.get("bars", 0) + 1
+        _hold("ROL", base["ROL"] + _flip("sway") * style["sway"] * soft)
+        if _dance["bars"] % 2 == 1:
+            _hold("YAW", base["YAW"] + _flip("turn") * style["turn"] * soft)
+
+
+def groove_end(now):
+    """The song finished: strike the end pose, hold it, then hand back."""
+    if not active() or _dance["mode"] != "groove" or _dance["end_at"] is not None:
+        return
+    style = _dance["style"]
+    _apply_motion(style)
+    for servo_name, angle in style["pose_end"].items():
+        _hold(servo_name, angle)
+    _dance["end_at"] = time.ticks_add(now, END_HOLD_MS)
+    print("[DANCE] GROOVE END")
+
+
+def _update_returns(now):
     held = _dance["held"]
     for name in list(_dance["returns"].keys()):
         due, _ = _dance["returns"][name]
         if time.ticks_diff(now, due) >= 0:
             del _dance["returns"][name]
             _set(name, held[name])
-
-    # Multi-step moves (None = back to the resting angle).
     if _dance["sequence"]:
         remaining = []
         for due, name, angle in _dance["sequence"]:
@@ -290,6 +466,35 @@ def update(now):
             else:
                 remaining.append((due, name, angle))
         _dance["sequence"] = remaining
+
+
+def _update_groove(now):
+    _update_returns(now)
+    if _dance["end_at"] is not None:
+        if time.ticks_diff(now, _dance["end_at"]) >= 0:
+            stop(now, "song finished")
+            return False
+    elif time.ticks_diff(now, _dance["last_beat_ms"]) > GROOVE_SILENCE_MS:
+        groove_end(now)                 # ESP went quiet: finish gracefully
+    return True
+
+
+def update(now):
+    """Run the dance. Returns True while the dance owns the servos."""
+    if not active():
+        return False
+    if _dance["mode"] == "groove":
+        return _update_groove(now)
+
+    t = _music_time(now)
+    moves = _dance["moves"]
+    while _dance["index"] < len(moves) and moves[_dance["index"]][0] <= t:
+        _, move, arg = moves[_dance["index"]]
+        _dance["index"] += 1
+        _do_move(move, arg, now)
+
+    # Returns from short pulses and multi-step moves.
+    _update_returns(now)
 
     # Finish once all moves are done and the final pose was held.
     if _dance["index"] >= len(moves):

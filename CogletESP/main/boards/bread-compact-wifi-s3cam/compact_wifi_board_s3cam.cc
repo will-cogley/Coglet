@@ -9,6 +9,9 @@
 #include "mcp_server.h"
 #include "coglet_reminder.h"
 #include "uart_component.h"
+#if CONFIG_COGLET_MUSIC
+#include "coglet_music.h"
+#endif
 
 #include <wifi_station.h>
 #include <esp_log.h>
@@ -337,23 +340,40 @@ private:
 #endif
 
 #if CONFIG_COGLET_DANCE
+        std::string dance_desc =
+            "Call when the user asks Coglet to dance / groove / move to music. Coglet ends the current "
+            "conversation, plays a song and dances to it, then starts talking again by itself.\n"
+            "style (built-in ~30 s tracks): mecha = heavy mecha electro, evil = gloomy gothic, "
+            "cat = gentle anime cat pop, random = a random built-in track "
+            "(use it when the user did not ask for anything specific).\n";
+#if CONFIG_COGLET_MUSIC
+        if (CogletMusic::kSongCount > 0) {
+            dance_desc += "The user's own songs (pass the exact name as style, or \"mine\" for a random one "
+                          "of them when the user asks for their own / custom music):";
+            for (size_t i = 0; i < CogletMusic::kSongCount; ++i) {
+                const auto& song = CogletMusic::kSongs[i];
+                dance_desc += std::string(i ? ", " : " ") + "\"" + song.name + "\" (" + song.PresetName() + ")";
+            }
+            dance_desc += ".\n";
+        }
+#endif
+        dance_desc +=
+            "After calling, reply with one very short line only (e.g. \"Watch this!\" / \"看我的！\").\n"
+            "When you later receive \"（跳完舞了）\" it means the dance just finished: ask the user, in "
+            "one playful sentence, how they liked it.";
         mcp_server.AddTool(
             "self.coglet.dance",
-            "当用户让 Coglet 跳舞、跳个舞、来段律动、跟着音乐动起来时调用。Coglet 会结束当前对话，"
-            "播放约 30 秒的内置音乐并跳舞，跳完自动开口。\n"
-            "style：mecha=浑厚机甲电子，evil=忧郁哥特，cat=温柔二次元猫系，random=随机（用户没指定时用）。\n"
-            "调用后只用一句很短的话回应（如“看我的！”），不要再说别的。\n"
-            "当你收到（跳完舞了）时，用一句俏皮的话问主人觉得你刚才跳得怎么样。",
+            dance_desc,
             PropertyList({Property("style", kPropertyTypeString, std::string("random"))}),
             [](const PropertyList& p) -> ReturnValue {
                 const std::string style = Application::GetInstance().RequestDance(
                     p["style"].value<std::string>());
                 if (style.empty()) {
-                    return std::string("Coglet 正在跳舞中，请稍后再试。");
+                    return std::string("Coglet is already dancing, try again in a moment.");
                 }
-                const char* name = style == "mecha" ? "机甲电子" : (style == "evil" ? "忧郁哥特" : "二次元猫系");
-                return std::string("马上开始跳") + name + "舞。只用一句很短的话回应（如“看我的！”），"
-                       "对话会自动结束；跳完后你会收到（跳完舞了），届时问主人觉得怎么样。";
+                return std::string("Starting the dance now (") + style + "). Reply with one very short "
+                       "line only; the conversation ends automatically. When you receive （跳完舞了）, ask "
+                       "the user how they liked it.";
             }
         );
         ESP_LOGI(TAG, "Registered Coglet dance MCP tool");
