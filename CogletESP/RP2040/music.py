@@ -21,8 +21,9 @@ import dance_data
 # ---------------------------------------------------------------- sync tuning
 # ESP PlaySound() -> sound actually leaving the speaker (decode + DMA).
 AUDIO_LATENCY_MS = 120
-# Start servo moves this much earlier so the motion peaks on the beat.
-SERVO_LEAD_MS = 40
+# Start servo moves this much earlier so the motion peaks on the beat
+# (a 15-25 deg move takes ~100 ms to arrive).
+SERVO_LEAD_MS = 100
 # Pose-end hold after the last move before control is handed back.
 END_HOLD_MS = 1200
 
@@ -35,44 +36,48 @@ STYLES = {
     "mecha": {
         "base": {"YAW": 90, "ROL": 90, "PIT": 45, "MOU": 150, "LID": 150,
                  "EYL": 90, "EYR": 90, "EAL": 110, "EAR": 90},
-        "motion": {"PIT": (500, 4000), "ROL": (300, 1500), "YAW": (250, 800),
-                   "EAL": (600, 4000), "EAR": (600, 4000), "LID": (600, 4000),
-                   "MOU": (2000, 10000), "EYL": (300, 3000), "EYR": (300, 3000)},
-        "nod": {"small": (7, 100), "big": (13, 140)},
-        "sway": 14,
-        "turn": 10,
+        "motion": {"PIT": (650, 7000), "ROL": (450, 3000), "YAW": (400, 1800),
+                   "EAL": (750, 9000), "EAR": (750, 9000), "LID": (900, 9000),
+                   "MOU": (2000, 10000), "EYL": (700, 9000), "EYR": (700, 9000)},
+        "nod": {"small": (11, 110), "big": (19, 150)},
+        "sway": 20,
+        "turn": 24,
+        "gaze": 30,
         "pose_end": {"YAW": 90, "ROL": 100, "PIT": 30, "MOU": 150, "LID": 150,
                      "EAL": 70, "EAR": 120},
     },
     "evil": {
         "base": {"YAW": 90, "ROL": 90, "PIT": 60, "MOU": 150, "LID": 125,
                  "EYL": 90, "EYR": 90, "EAL": 140, "EAR": 45},
-        "motion": {"PIT": (250, 1200), "ROL": (90, 400), "YAW": (150, 400),
-                   "EAL": (300, 1500), "EAR": (300, 1500), "LID": (300, 1500),
-                   "MOU": (1000, 6000), "EYL": (200, 1500), "EYR": (200, 1500)},
-        "nod": {"heavy": (10, 260), "small": (6, 160)},
-        "sway": 12,
-        "turn": 8,
+        "motion": {"PIT": (400, 3000), "ROL": (160, 900), "YAW": (220, 900),
+                   "EAL": (500, 5000), "EAR": (500, 5000), "LID": (600, 5000),
+                   "MOU": (1000, 6000), "EYL": (350, 3000), "EYR": (350, 3000)},
+        "nod": {"heavy": (15, 260), "small": (9, 160)},
+        "sway": 18,
+        "turn": 20,
+        "gaze": 24,
         "pose_end": {"YAW": 90, "ROL": 90, "PIT": 75, "MOU": 150, "LID": 110,
                      "EAL": 150, "EAR": 30},
     },
     "cat": {
         "base": {"YAW": 90, "ROL": 90, "PIT": 45, "MOU": 150, "LID": 150,
                  "EYL": 90, "EYR": 90, "EAL": 100, "EAR": 100},
-        "motion": {"PIT": (400, 3000), "ROL": (250, 1500), "YAW": (200, 700),
-                   "EAL": (600, 4000), "EAR": (600, 4000), "LID": (600, 4000),
-                   "MOU": (2000, 10000), "EYL": (300, 3000), "EYR": (300, 3000)},
-        "nod": {"small": (6, 100)},
-        "sway": 12,
-        "turn": 9,
+        "motion": {"PIT": (600, 6000), "ROL": (400, 2800), "YAW": (350, 1500),
+                   "EAL": (750, 9000), "EAR": (750, 9000), "LID": (900, 9000),
+                   "MOU": (2000, 10000), "EYL": (650, 8000), "EYR": (650, 8000)},
+        "nod": {"small": (10, 110)},
+        "sway": 18,
+        "turn": 22,
+        "gaze": 28,
         "pose_end": {"YAW": 90, "ROL": 72, "PIT": 40, "MOU": 40, "LID": 150,
                      "EAL": 75, "EAR": 115},
     },
 }
 
-EAR_FLICK_DEG = 35
-EAR_FLICK_MS = 140
-BLINK_MS = 110
+EAR_FLICK_DEG = 45
+EAR_FLICK_MS = 160
+BLINK_MS = 120
+EYE_CROSS_MS = 260
 MOUTH_OPEN_ANGLE = 30
 MOUTH_OPEN_MS = 450
 EYES_WIDE_MS = 700
@@ -97,9 +102,14 @@ def active():
     return _dance["name"] is not None
 
 
+# Fast dance moves can overshoot a target by ~1-2 deg while braking, so keep
+# dance targets a little inside each servo's soft limits.
+LIMIT_MARGIN_DEG = 3
+
+
 def _clamp(name, angle):
     servo = servos[name]
-    return max(servo.min_angle, min(servo.max_angle, angle))
+    return max(servo.min_angle + LIMIT_MARGIN_DEG, min(servo.max_angle - LIMIT_MARGIN_DEG, angle))
 
 
 def _set(name, angle):
@@ -195,18 +205,28 @@ def _do_move(move, arg, now):
     elif move in ("turn_L", "turn_R", "turn_center"):
         side = {"turn_L": -1, "turn_R": 1, "turn_center": 0}[move]
         _hold("YAW", base["YAW"] + side * style["turn"])
-        _hold("EYL", base["EYL"] + side * 8)
-        _hold("EYR", base["EYR"] + side * 8)
+    elif move == "eyes":
+        gaze = style["gaze"]
+        if arg in ("L", "R", "C"):
+            # Both eyes together, held until the next eye move.
+            side = {"L": -1, "R": 1, "C": 0}[arg]
+            _hold("EYL", base["EYL"] + side * gaze)
+            _hold("EYR", base["EYR"] + side * gaze)
+        else:
+            # Opposite directions for a moment, then back.
+            side = 1 if arg == "cross" else -1
+            _pulse("EYL", base["EYL"] + side * gaze, EYE_CROSS_MS, now)
+            _pulse("EYR", base["EYR"] - side * gaze, EYE_CROSS_MS, now)
     elif move == "head_tilt":
         side = -1 if arg == "L" else 1
-        _pulse("ROL", held["ROL"] + side * 16, 600, now)
+        _pulse("ROL", held["ROL"] + side * 22, 600, now)
     elif move == "head_roll":
-        _set("ROL", base["ROL"] - 12)
-        _dance["sequence"].append((time.ticks_add(now, 600), "ROL", base["ROL"] + 12))
+        _set("ROL", base["ROL"] - 16)
+        _dance["sequence"].append((time.ticks_add(now, 600), "ROL", base["ROL"] + 16))
         _dance["sequence"].append((time.ticks_add(now, 1200), "ROL", None))
     elif move == "shudder":
-        _set("ROL", held["ROL"] + 5)
-        _dance["sequence"].append((time.ticks_add(now, 60), "ROL", held["ROL"] - 5))
+        _set("ROL", held["ROL"] + 7)
+        _dance["sequence"].append((time.ticks_add(now, 60), "ROL", held["ROL"] - 7))
         _dance["sequence"].append((time.ticks_add(now, 120), "ROL", None))
     elif move == "crouch":
         seconds = float(arg or 4.0)
