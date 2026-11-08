@@ -181,6 +181,17 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
         // Keep HELLO near baseline and allow a schwa in the GL cluster
         // HH AH L OW  K AA G AH L EH T
         {"hello coglet mandarin",   "hcLb KnGcLfT"},
+
+        // Spanish-accented English candidates (no schwa, pure vowels,
+        // the H is often silent): "e-lo ko-glet"
+        // EH L OW  K OW G L EH T
+        {"hello coglet spanish",    "fLb KbGLfT"},
+        // HH EH L OW  K OW G L EH T
+        {"hello coglet spanish h",  "hfLb KbGLfT"},
+
+        // French / Italian-accented English candidate: silent H
+        // AH L OW  K AA G L EH T
+        {"hello coglet silent h",   "cLb KnGLfT"},
     };
 
     for (int i = 0; i < commands_.size(); i++) {
