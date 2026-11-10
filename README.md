@@ -1,5 +1,7 @@
 # Coglet
 Will Cogley's DIY Desktop Companion for Makers. See our [knowledge database](https://nmrobots.com/pages/coglet) for this project
+
+Now optionally runs locally/offline using our [offline backend](https://github.com/will-cogley/NMWorkbench) (still in early development)
 # Instructions
 *Core documentation for the system and PCB can be found in the [CogNog Datasheet](https://github.com/will-cogley/Coglet/blob/main/CogNogDatasheet.md)*
 
