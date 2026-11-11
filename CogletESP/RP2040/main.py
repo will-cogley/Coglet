@@ -50,6 +50,21 @@ SLEEP_TORQUE_RELEASE_DELAY_MS = 500
 servo_outputs_enabled = False
 sleep_settled_since = None
 
+# Staggered servo power-up:
+#   Turning all 9 servos on at the same instant draws a large current spike
+#   (they all jump to their target at once), which can brown out the board on
+#   a weak supply or cable. Every time PWM output is (re)enabled, all channels
+#   start fully off and are switched on one at a time, heavy axes first.
+#   Boot and Calibration Mode use a longer gap (servos may be far from their
+#   target after sitting unpowered); waking from standby uses a short gap so
+#   Coglet still reacts quickly.
+POWER_UP_ORDER = ("YAW", "PIT", "ROL", "LID", "MOU", "EAL", "EAR", "EYL", "EYR")
+POWER_UP_GAP_BOOT_MS = 150
+POWER_UP_GAP_WAKE_MS = 60
+power_up_queue = []          # [(due_ms, servo_name)], in order
+power_up_started_at = None
+power_up_reason = ""
+
 # These device states explicitly mean the assistant is no longer speaking.
 SPEECH_STOP_SIGNALS = (
     "neutral",
@@ -92,7 +107,43 @@ def _all_active_servos_settled():
     return True
 
 
-def _enable_servo_outputs(reason):
+def _start_power_up(reason, gap_ms):
+    """Switch every channel fully off, then queue them back on one by one."""
+    global power_up_queue
+    global power_up_started_at
+    global power_up_reason
+
+    for servo in servos.values():
+        servo.release()
+    now = time.ticks_ms()
+    order = [n for n in POWER_UP_ORDER if n in servos]
+    order += [n for n in servos if n not in order]
+    power_up_queue = [(time.ticks_add(now, i * gap_ms), name) for i, name in enumerate(order)]
+    power_up_started_at = now
+    power_up_reason = reason
+    print("[POWER] staggered power-up ({}): {} servos, {} ms apart".format(
+        reason, len(order), gap_ms))
+    _update_power_up(now)
+
+
+def _update_power_up(now):
+    """Switch on the servos whose turn has come (call every loop)."""
+    global power_up_queue
+    global power_up_started_at
+
+    while power_up_queue and time.ticks_diff(now, power_up_queue[0][0]) >= 0:
+        _, name = power_up_queue.pop(0)
+        # A calm groove keeps the eyelid / eye servos relaxed on purpose.
+        if music.keeps_released(name):
+            continue
+        servos[name].hold()
+    if not power_up_queue and power_up_started_at is not None:
+        print("[POWER] all servos on after {} ms ({})".format(
+            time.ticks_diff(now, power_up_started_at), power_up_reason))
+        power_up_started_at = None
+
+
+def _enable_servo_outputs(reason, gap_ms=POWER_UP_GAP_WAKE_MS):
     """Idempotently restore PCA9685 PWM output before any active behavior."""
     global servo_outputs_enabled
     global sleep_settled_since
@@ -102,9 +153,14 @@ def _enable_servo_outputs(reason):
     if servo_outputs_enabled:
         return True
 
+    # Channels go fully off BEFORE nOE is lowered, so nothing moves until the
+    # staggered sequence switches each servo on.
+    for servo in servos.values():
+        servo.release()
     if servoclass.enable_outputs():
         servo_outputs_enabled = True
         print("[SLEEP] servo outputs ENABLED ({})".format(reason))
+        _start_power_up(reason, gap_ms)
         return True
 
     return False
@@ -157,7 +213,15 @@ def _update_sleep_torque_release(now, calibration_owns_servos, mcp_owns_servos):
     servoclass.disable_outputs()
     servo_outputs_enabled = False
     sleep_settled_since = None
+    _cancel_power_up()
     print("[SLEEP] idle -> all servo holding torque RELEASED")
+
+
+def _cancel_power_up():
+    global power_up_queue
+    global power_up_started_at
+    power_up_queue = []
+    power_up_started_at = None
 
 
 def _clamp(value, low, high):
@@ -389,6 +453,18 @@ print(" Vision: UART0 TX=GPIO0 RX=GPIO1 @ 921600")
 print(" Vision: camera-in-eye tracker R18 (EYL/EYR + PIT, YAW handoff)")
 print("==============================================")
 
+# Why did we (re)start? A brown-out on the RP2040 shows up as a power-on reset.
+try:
+    import machine
+    _cause = machine.reset_cause()
+    _names = {getattr(machine, "PWRON_RESET", -1): "power-on (or brown-out)",
+              getattr(machine, "WDT_RESET", -2): "watchdog",
+              getattr(machine, "HARD_RESET", -3): "hard reset",
+              getattr(machine, "SOFT_RESET", -4): "soft reset"}
+    print("[BOOT] RP2040 reset cause: {} ({})".format(_names.get(_cause, "unknown"), _cause))
+except Exception as exc:
+    print("[BOOT] reset cause unavailable:", exc)
+
 if not servoclass.is_ready():
     print("[FATAL] PCA9685 0x40 was not detected.")
     print("[FATAL] Servo outputs stay disabled.")
@@ -406,7 +482,7 @@ print(
     )
 )
 
-servo_outputs_enabled = servoclass.enable_outputs()
+_enable_servo_outputs("boot", POWER_UP_GAP_BOOT_MS)
 
 # Build the initial home table once; it is refreshed every time
 # Calibration Mode is entered.
@@ -517,7 +593,7 @@ while True:
     # Calibration retains absolute priority over every servo command.
     # Wake PWM before Calibration Mode issues any servo command.
     if mode.value() == 0:
-        _enable_servo_outputs("Calibration Mode")
+        _enable_servo_outputs("Calibration Mode", POWER_UP_GAP_BOOT_MS)
 
     # --- START TEMPORARY ANIMATION TEST OVERRIDE ---
     calibration_owns_servos = _update_calibration_wiggle(now)
@@ -585,11 +661,13 @@ while True:
             )
 
             # When GP21 is OFF, vision.py pauses new Vision AI requests and
-            # performs no visual-follow servo writes.
+            # performs no visual-follow servo writes. In standby the eyelid is
+            # closed and nothing is tracked, so Grove inference is paused too
+            # (AT+BREAK) and resumes automatically on wake.
             eye_follower.update(
                 now,
                 animation.current_state,
-                enabled=facetrack_enabled,
+                enabled=facetrack_enabled and animation.current_state != "idle",
             )
 
             # MOU is independent from current emotion.  Run this after all
@@ -603,6 +681,10 @@ while True:
     # by set_immediate(). During non-wiggle calibration it moves toward home.
     for s in servos.values():
         s.update(dt)
+
+    # Switch on the next servo(s) of a staggered power-up, if one is running.
+    if power_up_queue:
+        _update_power_up(now)
 
     # Run this only after Servo.update(), so "settled" reflects the real
     # end-of-loop motion state. It changes only PCA9685 nOE and therefore

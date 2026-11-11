@@ -43,11 +43,11 @@ STYLES = {
                  "EYL": 90, "EYR": 90, "EAL": 110, "EAR": 90},
         "motion": {"PIT": (650, 7000), "ROL": (450, 3000), "YAW": (400, 1800),
                    "EAL": (750, 9000), "EAR": (750, 9000), "LID": (900, 9000),
-                   "MOU": (2000, 10000), "EYL": (700, 9000), "EYR": (700, 9000)},
+                   "MOU": (2000, 10000), "EYL": (420, 5000), "EYR": (420, 5000)},
         "nod": {"small": (11, 110), "big": (19, 150)},
         "sway": 20,
         "turn": 24,
-        "gaze": 30,
+        "gaze": 20,
         "pose_end": {"YAW": 90, "ROL": 100, "PIT": 30, "MOU": 150, "LID": 150,
                      "EAL": 70, "EAR": 120},
     },
@@ -56,11 +56,11 @@ STYLES = {
                  "EYL": 90, "EYR": 90, "EAL": 140, "EAR": 45},
         "motion": {"PIT": (400, 3000), "ROL": (160, 900), "YAW": (220, 900),
                    "EAL": (500, 5000), "EAR": (500, 5000), "LID": (600, 5000),
-                   "MOU": (1000, 6000), "EYL": (350, 3000), "EYR": (350, 3000)},
+                   "MOU": (1000, 6000), "EYL": (280, 2500), "EYR": (280, 2500)},
         "nod": {"heavy": (15, 260), "small": (9, 160)},
         "sway": 18,
         "turn": 20,
-        "gaze": 24,
+        "gaze": 16,
         "pose_end": {"YAW": 90, "ROL": 90, "PIT": 75, "MOU": 150, "LID": 110,
                      "EAL": 150, "EAR": 30},
     },
@@ -69,11 +69,11 @@ STYLES = {
                  "EYL": 90, "EYR": 90, "EAL": 100, "EAR": 100},
         "motion": {"PIT": (600, 6000), "ROL": (400, 2800), "YAW": (350, 1500),
                    "EAL": (750, 9000), "EAR": (750, 9000), "LID": (900, 9000),
-                   "MOU": (2000, 10000), "EYL": (650, 8000), "EYR": (650, 8000)},
+                   "MOU": (2000, 10000), "EYL": (420, 5000), "EYR": (420, 5000)},
         "nod": {"small": (10, 110)},
         "sway": 18,
         "turn": 22,
-        "gaze": 28,
+        "gaze": 19,
         "pose_end": {"YAW": 90, "ROL": 72, "PIT": 40, "MOU": 40, "LID": 150,
                      "EAL": 75, "EAR": 115},
     },
@@ -106,6 +106,12 @@ _dance = {
 
 def active():
     return _dance["name"] is not None
+
+
+def keeps_released(name):
+    """True if the running groove wants this servo relaxed (no torque)."""
+    return (active() and _dance["mode"] == "groove"
+            and name in _dance["style"].get("release", ()))
 
 
 # Fast dance moves can overshoot a target by ~1-2 deg while braking, so keep
@@ -281,11 +287,11 @@ GROOVES = {
                  "EYL": 90, "EYR": 90, "EAL": 110, "EAR": 90},
         "motion": {"PIT": (650, 7000), "ROL": (450, 3000), "YAW": (400, 1800),
                    "EAL": (750, 9000), "EAR": (750, 9000), "LID": (900, 9000),
-                   "MOU": (2000, 10000), "EYL": (700, 9000), "EYR": (700, 9000)},
+                   "MOU": (2000, 10000), "EYL": (420, 5000), "EYR": (420, 5000)},
         "nod": {"small": (10, 110)},
         "sway": 18,
         "turn": 22,
-        "gaze": 28,
+        "gaze": 19,
         "release": (),
         "pose_end": {"YAW": 90, "ROL": 100, "PIT": 32, "MOU": 150, "LID": 150,
                      "EAL": 72, "EAR": 118},
