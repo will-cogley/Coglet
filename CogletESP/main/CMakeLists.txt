@@ -1,5 +1,6 @@
 # Define source files
 set(SOURCES "coglet_reminder.cc"
+            "coglet_rp2040_sync.cc"
             "audio/audio_codec.cc"
             "audio/audio_service.cc"
             "audio/codecs/no_audio_codec.cc"
@@ -707,6 +708,30 @@ if(CONFIG_IDF_TARGET_ESP32)
                              )
 endif()
 
+# ---- NMRobotics Coglet: RP2040 program bundled into the ESP firmware -------
+# tools/rp2040_bundle/build_bundle.py packs CogletESP/RP2040/*.py into a C++
+# source; the ESP sends it to the RP2040 when the RP2040 runs another version
+# (see coglet_rp2040_sync.h). Runs every build, rewrites only on change.
+if(NOT CMAKE_BUILD_EARLY_EXPANSION)
+    idf_build_get_property(coglet_rp_project_dir PROJECT_DIR)
+    idf_build_get_property(coglet_rp_python PYTHON)
+    set(COGLET_RP2040_BUNDLE_SRC "${CMAKE_BINARY_DIR}/coglet_rp2040/coglet_rp2040_bundle.cc")
+    set(COGLET_RP2040_BUNDLE_CMD
+        ${coglet_rp_python} "${coglet_rp_project_dir}/tools/rp2040_bundle/build_bundle.py"
+        --src "${coglet_rp_project_dir}/RP2040"
+        --cc "${COGLET_RP2040_BUNDLE_SRC}")
+    if(NOT EXISTS "${COGLET_RP2040_BUNDLE_SRC}")
+        execute_process(COMMAND ${COGLET_RP2040_BUNDLE_CMD})
+    endif()
+    add_custom_target(coglet_rp2040_bundle ALL
+        COMMAND ${COGLET_RP2040_BUNDLE_CMD}
+        BYPRODUCTS "${COGLET_RP2040_BUNDLE_SRC}"
+        COMMENT "Coglet: packing the RP2040 program"
+        VERBATIM)
+    set_source_files_properties("${COGLET_RP2040_BUNDLE_SRC}" PROPERTIES GENERATED TRUE)
+    list(APPEND SOURCES "${COGLET_RP2040_BUNDLE_SRC}")
+endif()
+
 # ---- NMRobotics Coglet: custom dance songs from the Music folder ----------
 # Every audio file in CogletESP/Music/ is converted (ffmpeg -> Ogg/Opus) and
 # beat-analysed by tools/coglet_music/build_music.py into one generated C++
@@ -714,6 +739,8 @@ endif()
 # rewrites the source when the songs changed (BYPRODUCTS => Ninja "restat"),
 # so an unchanged Music folder costs a fraction of a second and no recompile.
 # Song file names never appear in the Ninja file (safe for non-ASCII names).
+# Songs added from the web flasher are read from flash at run time instead
+# (coglet_music_library.cc).
 if(CONFIG_COGLET_DANCE AND CONFIG_COGLET_MUSIC AND NOT CMAKE_BUILD_EARLY_EXPANSION)
     idf_build_get_property(coglet_project_dir PROJECT_DIR)
     idf_build_get_property(coglet_python PYTHON)
@@ -736,7 +763,7 @@ if(CONFIG_COGLET_DANCE AND CONFIG_COGLET_MUSIC AND NOT CMAKE_BUILD_EARLY_EXPANSI
         COMMENT "Coglet: checking the Music folder"
         VERBATIM)
     set_source_files_properties("${COGLET_MUSIC_SRC}" PROPERTIES GENERATED TRUE)
-    list(APPEND SOURCES "${COGLET_MUSIC_SRC}")
+    list(APPEND SOURCES "${COGLET_MUSIC_SRC}" "coglet_music_library.cc")
 endif()
 
 idf_component_register(SRCS ${SOURCES}
@@ -747,6 +774,9 @@ idf_component_register(SRCS ${SOURCES}
 
 if(TARGET coglet_music)
     add_dependencies(${COMPONENT_LIB} coglet_music)
+endif()
+if(TARGET coglet_rp2040_bundle)
+    add_dependencies(${COMPONENT_LIB} coglet_rp2040_bundle)
 endif()
 
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME

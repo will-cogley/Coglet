@@ -30,6 +30,9 @@ public:
     inline bool partition_valid() const { return partition_valid_; }
     inline bool checksum_valid() const { return checksum_valid_; }
     inline std::string default_assets_url() const { return default_assets_url_; }
+    // The whole assets partition as mapped memory (nullptr if not mapped).
+    // Used by the Coglet song library, which lives at the end of the partition.
+    inline const char* mapped_data() const { return mmap_root_; }
 
 private:
     Assets();

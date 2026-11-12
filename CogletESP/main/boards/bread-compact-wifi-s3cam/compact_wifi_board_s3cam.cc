@@ -347,11 +347,11 @@ private:
             "cat = gentle anime cat pop, random = a random built-in track "
             "(use it when the user did not ask for anything specific).\n";
 #if CONFIG_COGLET_MUSIC
-        if (CogletMusic::kSongCount > 0) {
+        if (CogletMusic::Count() > 0) {
             dance_desc += "The user's own songs (pass the exact name as style, or \"mine\" for a random one "
                           "of them when the user asks for their own / custom music):";
-            for (size_t i = 0; i < CogletMusic::kSongCount; ++i) {
-                const auto& song = CogletMusic::kSongs[i];
+            for (size_t i = 0; i < CogletMusic::Count(); ++i) {
+                const auto& song = *CogletMusic::At(i);
                 dance_desc += std::string(i ? ", " : " ") + "\"" + song.name + "\" (" + song.PresetName() + ")";
             }
             dance_desc += ".\n";

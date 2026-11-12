@@ -133,7 +133,7 @@ SPEAKING_MOUTH_MAX_SPEED = LISTENING_EAR_MAX_SPEED
 SPEAKING_MOUTH_MAX_ACCEL = LISTENING_EAR_MAX_ACCEL
 
 # MOU is speech-owned:
-# its continuous motion is controlled by the independent speech flag in main.py,
+# its continuous motion is controlled by the independent speech flag in app.py,
 # not by the current emotional/expression state.
 MOUTH_REST_ANGLE = 150
 
@@ -252,7 +252,7 @@ def update_speaking_mouth(now, speaking_active):
 # ============================================================
 # Random blink - simple timer version
 #
-# This is the old commented main.py blink idea moved into animation.py,
+# This is the old commented main.py (now app.py) blink idea moved into animation.py,
 # but corrected for PCB V2 and the measured eyelid range.
 #
 # Active only in:
@@ -307,7 +307,7 @@ def trigger_blink(now):
     """
     Start one blink.
 
-    This is the useful part of the old commented main.py trigger_blink():
+    This is the useful part of the old commented main.py (now app.py) trigger_blink():
     remember the current eyelid expression, close once, then let
     update_blink() restore it after BLINK_DURATION_MS.
     """
@@ -426,7 +426,7 @@ def reset_servo_motion_defaults():
 #
 # These are NOT expression states.  They temporarily take ownership of the
 # servos for a fixed 2-second window, then the latest normal state is
-# re-entered.  Calibration still has absolute priority in main.py.
+# re-entered.  Calibration still has absolute priority in app.py.
 #
 # Supported ESP action names:
 #   action:shake_head  -> ROL
@@ -435,7 +435,7 @@ def reset_servo_motion_defaults():
 #   action:right_ear   -> EAR
 #   action:ears        -> EAL + EAR
 #
-# While an MCP action owns the servos, main.py pauses normal State animation,
+# While an MCP action owns the servos, app.py pauses normal State animation,
 # random blinking, Grove Vision tracking, and speaking-mouth motion.  This is
 # intentional: a request such as "move your left ear" should visibly move only
 # that requested part for the 2-second action window.
@@ -509,7 +509,7 @@ def start_mcp_action(action_name, now=None):
 
     A new MCP action immediately replaces an older MCP action and receives a
     fresh 2-second ownership window.  The latest normal current_state is still
-    allowed to update in main.py while this action is running; it simply is not
+    allowed to update in app.py while this action is running; it simply is not
     applied until MCP ownership ends.
     """
     global new_state_flag
@@ -650,7 +650,7 @@ def update_mcp_action(now=None):
 
     Returns True while MCP still owns the servos.  Returns False when no MCP
     action is active, including the same loop in which the 2-second timeout is
-    reached; main.py can therefore resume the normal State immediately.
+    reached; app.py can therefore resume the normal State immediately.
     """
     if now is None:
         now = time.ticks_ms()

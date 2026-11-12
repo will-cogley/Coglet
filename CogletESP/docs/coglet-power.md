@@ -1,6 +1,6 @@
 # Coglet power-up and standby power
 
-## Staggered servo power-up (RP2040 `main.py`)
+## Staggered servo power-up (RP2040 `app.py`)
 
 Switching all 9 servos on at the same instant makes every servo jump to its
 target at once. On a weak supply or cable the current spike can pull the 5 V
@@ -54,14 +54,3 @@ CogNog 3.0 is designed for a plain **5 V / 3 A** USB-C supply. Multi-port
 fast chargers may not deliver 3 A at 5 V, and can briefly cut power when they
 rebalance between devices. Thin USB-A to USB-C cables can also drop a lot of
 voltage under load.
-
-## Tests
-
-```bash
-python3 tests/power_sim/test_main_power.py
-```
-
-This runs the real `main.py` on the host with simulated PCA9685, ESP UART and
-Grove. It checks the order and gaps of the boot, wake and calibration
-power-ups, that no two servos switch on together, Grove pause/resume in
-standby, and that a calm groove keeps the eye servos off.

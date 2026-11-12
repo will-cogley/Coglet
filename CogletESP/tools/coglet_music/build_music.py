@@ -21,7 +21,7 @@ Force a preset with the file name:  "My Song.calm.mp3", "Drop.energetic.wav".
 Usage (normally called by CMake):
   python build_music.py --src <Music dir> --out <build dir>
                         [--ffmpeg ffmpeg] [--max-seconds 60] [--bitrate 32]
-                        [--max-kb 1500]
+                        [--max-kb 400]
 """
 import argparse
 import array
@@ -542,7 +542,7 @@ def main(argv=None):
     ap.add_argument("--ffmpeg", default="ffmpeg")
     ap.add_argument("--max-seconds", type=int, default=60)
     ap.add_argument("--bitrate", type=int, default=32)
-    ap.add_argument("--max-kb", type=int, default=1500)
+    ap.add_argument("--max-kb", type=int, default=400)
     ap.add_argument("--stamp", help="file to touch when done (for CMake)")
     args = ap.parse_args(argv)
 

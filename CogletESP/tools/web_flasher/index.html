@@ -1,0 +1,1140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coglet Updater</title>
+<meta name="description" content="Update your Coglet robot and add your own songs, right from the browser. Keeps your Wi-Fi and xiaozhi.me pairing.">
+<style>
+  :root {
+    --bg: #f6f5f2;
+    --card: #ffffff;
+    --ink: #1d1d1f;
+    --muted: #5f6368;
+    --line: #d6d3cc;
+    --accent: #2860c8;
+    --accent-ink: #ffffff;
+    --ok: #17703c;
+    --warn: #8a5300;
+    --err: #c62828;
+    --code: #f0eee9;
+    --focus: #2860c8;
+    --attention: #fff6e0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141416; --card: #1e1e21; --ink: #ececee; --muted: #a2a4a8; --line: #3a3a40;
+      --accent: #5b8ff0; --accent-ink: #0d0d0f; --ok: #4cc27d; --warn: #e3a344; --err: #ef6a6a;
+      --code: #26262a; --focus: #8fb3ff; --attention: #2e2717;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141416; --card: #1e1e21; --ink: #ececee; --muted: #a2a4a8; --line: #3a3a40;
+    --accent: #5b8ff0; --accent-ink: #0d0d0f; --ok: #4cc27d; --warn: #e3a344; --err: #ef6a6a;
+    --code: #26262a; --focus: #8fb3ff; --attention: #2e2717;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; } }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 1rem/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.75rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  h2 { font-size: 1.15rem; margin: 0 0 12px; }
+  h3 { font-size: 1rem; margin: 18px 0 8px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px; margin-bottom: 16px; }
+  .card.attention { border: 2px solid var(--warn); background: var(--attention); }
+  ol, ul { margin: 0; padding-left: 1.3em; }
+  li { margin: 6px 0; }
+  .version { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); }
+  .version b { color: var(--ink); font-weight: 600; }
+  button, .button {
+    font: inherit; border: 2px solid transparent; border-radius: 10px; padding: 10px 18px; min-height: 44px; cursor: pointer;
+    background: var(--accent); color: var(--accent-ink); font-weight: 600;
+  }
+  button.secondary { background: transparent; color: var(--ink); border-color: var(--line); font-weight: 500; }
+  button.small { min-height: 36px; padding: 4px 12px; font-size: 0.92rem; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  progress { width: 100%; height: 14px; margin-top: 16px; accent-color: var(--accent); }
+  .status { margin-top: 12px; font-weight: 500; min-height: 1.5em; }
+  .status.ok { color: var(--ok); } .status.warn { color: var(--warn); } .status.err { color: var(--err); }
+  details { margin-top: 12px; }
+  summary { cursor: pointer; color: var(--muted); padding: 4px 0; }
+  details.faq { border-top: 1px solid var(--line); margin: 0; padding: 6px 0; }
+  details.faq summary { color: var(--ink); font-weight: 500; }
+  details.faq > div { color: var(--muted); padding: 4px 0 8px; }
+  pre {
+    background: var(--code); border-radius: 8px; padding: 12px; margin: 10px 0 0;
+    max-height: 280px; overflow: auto; font: 0.8rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap; word-break: break-all;
+  }
+  label.check { display: flex; gap: 10px; align-items: flex-start; margin: 10px 0; }
+  label.check input { width: 20px; height: 20px; margin-top: 2px; flex: none; }
+  select, input[type="text"] {
+    font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--muted);
+    background: var(--card); color: var(--ink); min-height: 40px;
+  }
+  .note { color: var(--muted); font-size: 0.95rem; }
+  .callout { border-left: 4px solid var(--warn); padding: 8px 12px; margin: 14px 0 0; background: var(--code); border-radius: 0 8px 8px 0; }
+  .danger { color: var(--err); }
+  .hidden { display: none !important; }
+  code { background: var(--code); padding: 1px 5px; border-radius: 5px; font-size: 0.9em; }
+  a { color: var(--accent); }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  .skip { position: absolute; left: 16px; top: -60px; background: var(--card); padding: 8px 12px; border-radius: 8px; z-index: 10; }
+  .skip:focus { top: 12px; }
+  .switches { display: flex; flex-wrap: wrap; gap: 18px; margin: 14px 0 4px; }
+  .switches figure { margin: 0; text-align: center; color: var(--muted); font-size: 0.9rem; }
+  .switches svg { display: block; }
+  /* songs */
+  .drop {
+    display: block; position: relative; border: 2px dashed var(--muted); border-radius: 12px; padding: 18px;
+    text-align: center; cursor: pointer; margin-top: 14px;
+  }
+  .drop:focus-within { outline: 3px solid var(--focus); outline-offset: 2px; }
+  .drop.over { border-color: var(--accent); background: var(--code); }
+  .drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+  .songs { list-style: none; padding: 0; margin: 10px 0 0; }
+  .songs li { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+  .songs li.removed { opacity: 0.6; }
+  .songs li.removed .name { text-decoration: line-through; }
+  .songs .top { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; }
+  .songs .name { font-weight: 600; word-break: break-word; }
+  .songs .meta { color: var(--muted); font-size: 0.92rem; }
+  .songs .edit { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: end; margin-top: 8px; }
+  .songs .edit label { display: flex; flex-direction: column; font-size: 0.9rem; color: var(--muted); gap: 2px; }
+  .songs .edit input[type="text"] { min-width: 14em; }
+  .meter { margin-top: 12px; }
+  .meter progress { margin-top: 4px; }
+</style>
+</head>
+<body>
+<a class="skip" href="#update">Skip to the updater</a>
+<div id="announce" class="sr-only" aria-live="assertive" aria-atomic="true"></div>
+<main>
+  <h1>Coglet Updater</h1>
+  <p class="sub">Update your Coglet and add your own songs, right from this page. Nothing to install. Your Wi-Fi settings and xiaozhi.me pairing are kept.</p>
+
+  <section class="card" id="unsupported" hidden aria-labelledby="unsupported-h">
+    <h2 id="unsupported-h" class="danger">This browser can't talk to USB devices</h2>
+    <p>Please open this page in <b>Google Chrome</b> or <b>Microsoft Edge</b> on a desktop or laptop computer (Windows, macOS or Linux). Safari, Firefox and phones can't connect to Coglet.</p>
+  </section>
+
+  <section class="card" aria-labelledby="fw-h">
+    <h2 id="fw-h">Latest firmware</h2>
+    <div class="version" id="version">Loading…</div>
+  </section>
+
+  <section class="card" id="update" aria-labelledby="update-h" tabindex="-1">
+    <h2 id="update-h">Update Coglet</h2>
+    <ol>
+      <li>Plug Coglet into this computer through the <b>top USB-C port</b>, with a data cable (some cables only charge).</li>
+      <li>Leave the small switch on the board on <b>ESP</b>, as it comes from the factory.</li>
+      <li>Click <b>Connect &amp; Update</b> and choose Coglet in the list that appears.</li>
+      <li>Wait until it says <b>Done</b> (1 to 3 minutes). Keep Coglet plugged in meanwhile.</li>
+    </ol>
+    <p class="callout note"><b>Built your own firmware?</b> (for example with songs in the <code>Music</code> folder, or changed settings) This installs the official version instead; rebuild yours afterwards. Songs added under <b>My songs</b> on this page are always kept.</p>
+    <div class="row" style="margin-top:18px">
+      <button type="button" id="flash">Connect &amp; Update</button>
+      <button type="button" id="monitor" class="secondary">Show device log</button>
+    </div>
+    <progress id="progress" value="0" max="100" class="hidden" aria-label="Update progress"></progress>
+    <div id="status" class="status" role="status" aria-live="polite"></div>
+
+    <details id="advanced">
+      <summary>Advanced options</summary>
+      <label class="check"><input type="checkbox" id="allports">
+        <span><b>Show all ports.</b> Use this if Coglet isn't in the list when you connect.</span>
+      </label>
+      <label class="check"><input type="checkbox" id="erase">
+        <span><b>Fresh install: erase everything first.</b> <span class="danger">Your Wi-Fi settings, xiaozhi.me pairing, reminders and songs will be deleted</span>, so you'll need to set Wi-Fi up and pair Coglet again. Only use this if you've been asked to.</span>
+      </label>
+      <label class="check" style="align-items:center"><span>Upload speed</span>
+        <select id="baud">
+          <option value="921600" selected>921600 (fast)</option>
+          <option value="460800">460800</option>
+          <option value="115200">115200 (slow, most compatible)</option>
+        </select>
+      </label>
+    </details>
+
+    <details id="logbox">
+      <summary>Device log</summary>
+      <pre id="log" tabindex="0" aria-label="Device log"></pre>
+      <div class="row" style="margin-top:8px"><button type="button" class="secondary small" id="copy">Copy log</button></div>
+    </details>
+  </section>
+
+  <section class="card" id="rpcard" aria-labelledby="rp-h" tabindex="-1">
+    <h2 id="rp-h">One-time servo board (RP2040) setup</h2>
+    <div id="rpneeded" class="hidden">
+      <p><b>One more step, only this once.</b> Coglet's servo board still runs its old program, so it can't receive updates yet. After this step, every update on this page updates it too.</p>
+    </div>
+    <p class="note" id="rpintro">Coglets made before November 2026 need this <b>once</b>, so that updates reach the servo board as well. The page tells you after an update if your Coglet needs it. It's harmless to do it again.</p>
+    <div class="switches" aria-hidden="false">
+      <figure>
+        <svg width="150" height="64" viewBox="0 0 150 64" role="img" aria-label="Switch slid to the RP2040 side for this setup">
+          <rect x="1" y="14" width="148" height="36" rx="18" fill="none" stroke="currentColor" stroke-width="2"/>
+          <rect x="77" y="18" width="68" height="28" rx="14" fill="currentColor"/>
+          <text x="38" y="37" text-anchor="middle" font-size="13" fill="currentColor">ESP</text>
+          <text x="111" y="37" text-anchor="middle" font-size="13" fill="var(--card)" font-weight="700">RP2040</text>
+        </svg>
+        <figcaption>During this setup</figcaption>
+      </figure>
+      <figure>
+        <svg width="150" height="64" viewBox="0 0 150 64" role="img" aria-label="Switch slid to the ESP side, the normal position">
+          <rect x="1" y="14" width="148" height="36" rx="18" fill="none" stroke="currentColor" stroke-width="2"/>
+          <rect x="5" y="18" width="68" height="28" rx="14" fill="currentColor"/>
+          <text x="39" y="37" text-anchor="middle" font-size="13" fill="var(--card)" font-weight="700">ESP</text>
+          <text x="111" y="37" text-anchor="middle" font-size="13" fill="currentColor">RP2040</text>
+        </svg>
+        <figcaption>Normal use and updates</figcaption>
+      </figure>
+    </div>
+    <ol>
+      <li>Unplug Coglet, slide the small switch on the board to <b>RP2040</b>, and plug it back in (top USB-C port).</li>
+      <li>Click <b>Set up servo board</b> and choose the RP2040 in the list (often "Board CDC" or "USB Serial Device").</li>
+      <li>When it says <b>Done</b>, unplug Coglet, slide the switch back to <b>ESP</b>, plug it in, and click <b>Check Coglet</b>.</li>
+    </ol>
+    <div class="row" style="margin-top:18px">
+      <button type="button" id="rpsetup">Set up servo board</button>
+      <button type="button" id="rpcheck" class="secondary">Check Coglet</button>
+    </div>
+    <progress id="rpprogress" value="0" max="100" class="hidden" aria-label="Servo board setup progress"></progress>
+    <div id="rpstatus" class="status" role="status" aria-live="polite"></div>
+  </section>
+
+  <section class="card" id="songcard" aria-labelledby="songs-h">
+    <h2 id="songs-h">My songs</h2>
+    <p>Add your own music and ask Coglet to dance to it, for example <i>"dance to Night Rain"</i> or <i>"dance to one of my songs"</i>. Coglet finds the beat by itself and picks a dance style: <b>energetic</b> (big moves, eyes join in) or <b>calm</b> (gentle sway). The songs are stored on Coglet and kept through updates.</p>
+    <p class="note">Up to 60 seconds per song (longer songs fade out). Most audio and video files work (mp3, wav, m4a, flac, ogg, mp4…). Please only add music you have the right to use.</p>
+    <div id="songsoff" class="callout note hidden"></div>
+    <div class="row" style="margin-top:14px">
+      <button type="button" id="songread" class="secondary">Show songs on Coglet</button>
+    </div>
+    <div class="meter hidden" id="meter">
+      <div id="metertext"></div>
+      <progress id="meterbar" value="0" max="100" aria-label="Room used by songs"></progress>
+    </div>
+    <h3 id="onco-h" class="hidden">On Coglet</h3>
+    <ul class="songs" id="devsongs" aria-labelledby="onco-h"></ul>
+    <h3 id="new-h" class="hidden">New songs</h3>
+    <ul class="songs" id="newsongs" aria-labelledby="new-h"></ul>
+    <label class="drop" id="drop">
+      <input type="file" id="songfiles" multiple accept="audio/*,video/*,.mp3,.wav,.m4a,.flac,.ogg,.opus,.aac,.mp4,.mov,.webm">
+      <b>Add songs:</b> choose files, or drop them here
+    </label>
+    <div class="row" style="margin-top:14px">
+      <button type="button" id="songsave" disabled>Save to Coglet</button>
+    </div>
+    <progress id="songprogress" value="0" max="100" class="hidden" aria-label="Saving songs"></progress>
+    <div id="songstatus" class="status" role="status" aria-live="polite"></div>
+  </section>
+
+  <section class="card" aria-labelledby="faq-h">
+    <h2 id="faq-h">Questions and problems</h2>
+    <details class="faq"><summary>Coglet isn't in the list of ports</summary><div>
+      Try another USB cable (many cables only charge), another USB port on the computer, and make sure you use Coglet's <b>top</b> USB-C port with the switch on <b>ESP</b>. On Windows the USB driver installs by itself the first time; give it a minute. If it still doesn't show up, tick <b>Show all ports</b> under Advanced options.</div></details>
+    <details class="faq"><summary>There are several ports in the list. Which one is Coglet?</summary><div>
+      Unplug Coglet and connect again: the entry that disappeared is Coglet. Usually it's called "USB Serial", "CH340/CH343", "CP210x" or "USB JTAG/serial". The page remembers your choice.</div></details>
+    <details class="faq"><summary>"Failed to connect"</summary><div>
+      Close anything else that may be using the port (Thonny, the Arduino IDE, another tab with this page), then try again. If it still fails, hold the <b>BOOT</b> button, press and release <b>RESET</b>, release <b>BOOT</b>, and click Connect &amp; Update. A slower upload speed under Advanced options can help too.</div></details>
+    <details class="faq"><summary>What if the update stops halfway, or I unplug Coglet by accident?</summary><div>
+      Nothing breaks for good: plug Coglet back in and run the update again. If the servo board was being updated when the power went off, Coglet finishes or repeats that by itself the next time it starts.</div></details>
+    <details class="faq"><summary>Do I have to open Coglet to reach the switch?</summary><div>
+      Only for the one-time servo board setup, and only on Coglets made before November 2026. Normal updates use the ESP position, as Coglet comes. If you'd rather not open it, you can still update: everything works except new servo moves, which need that one step.</div></details>
+    <details class="faq"><summary>What's new in this version?</summary><div id="whatsnew">
+      See the release notes on GitHub.</div></details>
+    <details class="faq"><summary>I build my own firmware. Will this page overwrite it?</summary><div>
+      Yes: <b>Connect &amp; Update</b> installs the official firmware. Songs in your <code>Music</code> folder are compiled into your own build, so they are replaced too; the files on your computer are not touched, and rebuilding brings them back. Songs added on this page are stored separately and kept. To keep your own changes, merge the new version into your code and build it yourself.</div></details>
+    <details class="faq"><summary>How many songs fit, and why does a song dance oddly?</summary><div>
+      About 8 one-minute songs (2 MB); the bar above shows the room left. If the moves feel wrong for a song, change its style to <b>energetic</b> or <b>calm</b> before saving: calm songs are danced on the slow, felt beat.</div></details>
+    <details class="faq"><summary>After updating, Coglet says a 6-digit code</summary><div>
+      Coglet needs to be paired with xiaozhi.me again. This only happens after a fresh install.</div></details>
+    <details class="faq"><summary>The servo board setup can't connect</summary><div>
+      Make sure the switch is on <b>RP2040</b> and that nothing else (Thonny, another tab) has the port open. If the board never had MicroPython installed, ask in the community for the starter firmware first.</div></details>
+    <details class="faq"><summary>Asking for help</summary><div>
+      Click <b>Show device log</b>, make the problem happen, then click <b>Copy log</b> and post it in the community. After an update the log opens by itself.</div></details>
+  </section>
+</main>
+
+<script>
+// Plain script, so these messages appear even if the tools below can't load.
+(function () {
+  var ok = !!navigator.serial && window.isSecureContext;
+  if (!ok) document.getElementById("unsupported").hidden = false;
+  setTimeout(function () {
+    if (window.__cogletReady) return;
+    var v = document.getElementById("version");
+    v.textContent = "The page couldn't load its tools. Check your internet connection and reload the page.";
+    v.className = "version status err";
+  }, 15000);
+})();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+<script type="module">
+import { ESPLoader, Transport } from "https://cdn.jsdelivr.net/npm/esptool-js@0.6.1/bundle.js";
+import * as Songs from "./coglet_songs.js";
+
+const $ = (id) => document.getElementById(id);
+const logEl = $("log");
+const flashBtn = $("flash");
+const monitorBtn = $("monitor");
+const rpBtn = $("rpsetup");
+const rpCheckBtn = $("rpcheck");
+let manifest = null;
+let monitorPort = null;
+let monitorReader = null;
+const supported = !!navigator.serial && window.isSecureContext;
+
+// ------------------------------------------------------------------ helpers
+function log(line) {
+  logEl.textContent += line + "\n";
+  logEl.scrollTop = logEl.scrollHeight;
+}
+// Errors are also announced at once to screen readers, and start with
+// "Error:" so they never depend on colour alone.
+function setStatus(el, text, kind = "") {
+  el.textContent = text ? (kind === "err" ? "Error: " : "") + text : "";
+  el.className = "status " + kind;
+  if (kind === "err") {
+    const said = el.textContent;
+    $("announce").textContent = "";
+    setTimeout(() => { $("announce").textContent = said; }, 50);
+  }
+}
+const status = (t, k) => setStatus($("status"), t, k);
+const rpStatus = (t, k) => setStatus($("rpstatus"), t, k);
+const songStatus = (t, k) => setStatus($("songstatus"), t, k);
+const errText = (e) => (e && e.message) ? e.message : String(e);
+const noPort = (e) => /No port selected|NotFoundError/i.test(errText(e));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const kb = (n) => Math.round(n / 1024).toLocaleString() + " KB";
+
+let busyNow = false;
+function busy(on) {
+  busyNow = on;
+  for (const b of [flashBtn, monitorBtn, rpBtn, rpCheckBtn, $("songread")]) b.disabled = on || !supported;
+  if (on) flashBtn.disabled = true; else flashBtn.disabled = !supported || !manifest;
+  updateSongButtons();
+}
+
+// Progress bars also speak at every quarter for screen readers.
+function progressReporter(bar, label, say) {
+  let lastQuarter = -1;
+  bar.value = 0;
+  bar.classList.remove("hidden");
+  return (frac) => {
+    const pct = Math.max(0, Math.min(100, Math.round(frac * 100)));
+    bar.value = pct;
+    const q = Math.floor(pct / 25);
+    if (q !== lastQuarter && pct < 100) { lastQuarter = q; say(label + " " + pct + "%…"); }
+  };
+}
+
+function md5(bytes) {
+  return CryptoJS.MD5(CryptoJS.lib.WordArray.create(bytes)).toString();
+}
+
+window.__cogletReady = true;
+
+// ------------------------------------------------------------------ manifest
+async function loadManifest() {
+  try {
+    const r = await fetch("firmware/manifest.json", { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    manifest = await r.json();
+    const total = manifest.parts.reduce((s, p) => s + p.size, 0);
+    const v = $("version");
+    v.innerHTML = "<span>Version <b></b></span><span>Built <b></b></span><span>Size <b></b></span>";
+    const b = v.querySelectorAll("b");
+    b[0].textContent = manifest.version + (manifest.commit ? " (" + manifest.commit + ")" : "");
+    b[1].textContent = manifest.built;
+    b[2].textContent = (total / 1048576).toFixed(1) + " MB";
+    if (manifest.repo) {
+      const tag = /^v\d/.test(manifest.version);
+      const url = "https://github.com/" + manifest.repo + (tag ? "/releases/tag/" + manifest.version : "/commits");
+      const a = document.createElement("a");
+      a.href = url; a.textContent = "What's new"; a.rel = "noopener";
+      const span = document.createElement("span"); span.appendChild(a); v.appendChild(span);
+      const w = $("whatsnew"); w.textContent = "";
+      const a2 = a.cloneNode(true); a2.textContent = tag ? "Release notes for " + manifest.version : "Recent changes on GitHub";
+      w.appendChild(a2);
+    }
+    if (!manifest.songs) {
+      $("songsoff").textContent = "This firmware build has no song storage, so songs can't be added here.";
+      $("songsoff").classList.remove("hidden");
+    }
+  } catch (e) {
+    $("version").textContent = "Couldn't load the firmware list (" + errText(e) + "). Please try again later.";
+  }
+  busy(false);
+}
+
+async function downloadParts() {
+  const files = [];
+  let done = 0;
+  for (const part of manifest.parts) {
+    status("Downloading firmware (" + (++done) + " of " + manifest.parts.length + ")…");
+    const r = await fetch("firmware/" + part.path, { cache: "no-store" });
+    if (!r.ok) throw new Error("download failed: " + part.path + " (HTTP " + r.status + ")");
+    const data = new Uint8Array(await r.arrayBuffer());
+    if (data.length !== part.size || md5(data) !== part.md5) {
+      throw new Error("the download of " + part.path + " is damaged, please reload the page");
+    }
+    files.push({ data, address: part.offset, name: part.path });
+    log("downloaded " + part.path + " (" + data.length + " bytes) -> 0x" + part.offset.toString(16));
+  }
+  return files;
+}
+
+// ------------------------------------------------------------------ ports
+// Only USB-serial chips Coglet uses are listed ("Show all ports" lists all).
+// The choice is remembered (by USB id), so nobody has to pick it twice, also
+// after unplugging.
+const FILTERS = {
+  esp: [0x303a, 0x1a86, 0x10c4, 0x0403, 0x067b].map((v) => ({ usbVendorId: v })),
+  rp: [{ usbVendorId: 0x2e8a }],
+};
+const ports = { esp: null, rp: null };
+function savedId(kind) {
+  try { return JSON.parse(localStorage.getItem("coglet.port." + kind) || "null"); } catch (e) { return null; }
+}
+function remember(kind, port) {
+  ports[kind] = port;
+  const i = port.getInfo();
+  try { localStorage.setItem("coglet.port." + kind, JSON.stringify({ v: i.usbVendorId, p: i.usbProductId })); } catch (e) {}
+}
+const askAgain = { esp: false, rp: false };
+async function getPort(kind) {
+  if (ports[kind]) return ports[kind];
+  const want = askAgain[kind] ? null : savedId(kind);
+  let granted = [];
+  try { granted = await navigator.serial.getPorts(); } catch (e) {}
+  const match = granted.filter((p) => {
+    const i = p.getInfo();
+    return want ? i.usbVendorId === want.v && i.usbProductId === want.p
+                : FILTERS[kind].some((f) => f.usbVendorId === i.usbVendorId);
+  });
+  if (!askAgain[kind] && match.length === 1) { ports[kind] = match[0]; return match[0]; }
+  const port = await navigator.serial.requestPort($("allports").checked ? {} : { filters: FILTERS[kind] });
+  remember(kind, port);
+  askAgain[kind] = false;
+  return port;
+}
+// A wrong or unusable choice is forgotten, so the next try asks again.
+function forgetPort(kind) {
+  ports[kind] = null;
+  askAgain[kind] = true;
+  try { localStorage.removeItem("coglet.port." + kind); } catch (e) {}
+}
+$("allports").addEventListener("change", () => { if ($("allports").checked) { forgetPort("esp"); forgetPort("rp"); } });
+if (supported) {
+  navigator.serial.addEventListener("disconnect", (e) => {
+    for (const k of Object.keys(ports)) if (ports[k] === e.target) ports[k] = null;
+  });
+}
+
+// ------------------------------------------------------------------ device log
+// Lines from Coglet's log are also given to the "watchers" below, so the page
+// can tell what Coglet is doing after an update (servo board sync, songs).
+const watchers = new Set();
+let lineBuf = "";
+function feedLines(text) {
+  lineBuf += text;
+  let i;
+  while ((i = lineBuf.indexOf("\n")) >= 0) {
+    const line = lineBuf.slice(0, i);
+    lineBuf = lineBuf.slice(i + 1);
+    for (const w of Array.from(watchers)) { try { w(line); } catch (e) {} }
+  }
+  if (lineBuf.length > 4000) lineBuf = lineBuf.slice(-1000);
+}
+
+async function stopMonitor() {
+  try { if (monitorReader) await monitorReader.cancel(); } catch (e) {}
+  try { if (monitorPort) await monitorPort.close(); } catch (e) {}
+  monitorReader = null;
+  monitorPort = null;
+  monitorBtn.textContent = "Show device log";
+}
+
+// Live log on a chosen port. reset=true restarts Coglet first (pulse on RTS,
+// with DTR off so it boots normally), so the log starts from boot.
+async function startMonitor(port, reset) {
+  await stopMonitor();
+  monitorPort = port;
+  await monitorPort.open({ baudRate: 115200 });
+  try {
+    await monitorPort.setSignals({ dataTerminalReady: false, requestToSend: reset });
+    if (reset) {
+      await sleep(120);
+      await monitorPort.setSignals({ dataTerminalReady: false, requestToSend: false });
+    }
+  } catch (e) {}
+  monitorBtn.textContent = "Stop log";
+  $("logbox").open = true;
+  logEl.textContent += "\n---------------- Coglet log ----------------\n";
+  lineBuf = "";
+  const decoder = new TextDecoder();
+  const reader = monitorPort.readable.getReader();
+  monitorReader = reader;
+  (async () => {
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const text = decoder.decode(value, { stream: true }).replace(/\x1b\[[0-9;]*m/g, "");
+        logEl.textContent += text;
+        if (logEl.textContent.length > 400000) logEl.textContent = logEl.textContent.slice(-300000);
+        logEl.scrollTop = logEl.scrollHeight;
+        feedLines(text);
+      }
+    } catch (e) {
+      if (!/cancel/i.test(errText(e))) status("The log stopped: " + errText(e), "warn");
+    } finally {
+      if (monitorReader === reader) await stopMonitor();
+    }
+  })();
+}
+
+// Watch Coglet's boot for the servo board (RP2040) sync and report it.
+function watchServoBoard(say, { onNeeded } = {}) {
+  let seen = false;
+  const w = (line) => {
+    if (!/CogletRp2040/.test(line)) return;
+    seen = true;
+    if (/did not answer/.test(line)) {
+      watchers.delete(w);
+      say("Coglet is updated. One more step is needed, only this once: see \"servo board setup\" below.", "warn");
+      if (onNeeded) onNeeded();
+    } else if (/sending \d+ files/.test(line)) {
+      say("Coglet is now updating its servo board (about half a minute). Keep it plugged in…");
+    } else if (/RP2040 updated|RP2040 up to date/.test(line)) {
+      watchers.delete(w);
+      say("All set: Coglet and its servo board are up to date.", "ok");
+    } else if (/update failed/.test(line)) {
+      watchers.delete(w);
+      say("The servo board didn't update this time; Coglet tries again the next time it starts. " +
+          "If this keeps happening, do the servo board setup below.", "warn");
+    }
+  };
+  watchers.add(w);
+  setTimeout(() => { if (!seen) watchers.delete(w); }, 60000);
+  return w;
+}
+
+function showServoBoardNeeded() {
+  const card = $("rpcard");
+  card.classList.add("attention");
+  $("rpneeded").classList.remove("hidden");
+  $("rpintro").classList.add("hidden");
+  card.scrollIntoView({ block: "start" });
+  card.focus({ preventScroll: true });
+}
+
+// ------------------------------------------------------------------ ESP connection
+const terminal = { clean() {}, writeLine: (d) => log(d), write: (d) => { logEl.textContent += d; } };
+
+async function connectEsp(say) {
+  await stopMonitor();
+  const port = await getPort("esp");
+  const transport = new Transport(port, false);
+  const loader = new ESPLoader({ transport, baudrate: parseInt($("baud").value, 10), terminal });
+  say("Connecting to Coglet…");
+  let chip;
+  try {
+    chip = await loader.main();
+  } catch (e) {
+    try { await transport.disconnect(); } catch (x) {}
+    forgetPort("esp");
+    throw new Error("couldn't connect (" + errText(e) + "). Is the switch on ESP, and is the port free? See \"Failed to connect\" below.");
+  }
+  log("connected: " + chip);
+  if (!/ESP32-S3/i.test(chip)) {
+    try { await transport.disconnect(); } catch (x) {}
+    forgetPort("esp");
+    throw new Error("this is a " + chip + ", not Coglet's ESP32-S3. Is the board switch on ESP?");
+  }
+  return { port, transport, loader };
+}
+
+async function finishAndWatch(conn, say, onNeeded) {
+  await conn.loader.after("hard_reset");
+  try { await conn.transport.disconnect(); } catch (e) {}
+  watchServoBoard(say, { onNeeded });
+  try {
+    await startMonitor(conn.port, true);
+  } catch (e) {
+    log("couldn't open the log: " + errText(e));
+  }
+}
+
+// ------------------------------------------------------------------ update
+flashBtn.addEventListener("click", async () => {
+  if (!manifest || busyNow) return;
+  const erase = $("erase").checked;
+  if (erase && !confirm("Erase everything? Wi-Fi settings, the xiaozhi.me pairing, reminders and songs will be deleted.")) return;
+  busy(true);
+  logEl.textContent = "";
+  $("progress").classList.add("hidden");
+  let conn = null;
+  try {
+    const files = await downloadParts();
+    status("Choose Coglet in the list that appears…");
+    conn = await connectEsp(status);
+    const total = files.reduce((s, f) => s + f.data.length, 0);
+    const before = files.map((f, i) => files.slice(0, i).reduce((s, g) => s + g.data.length, 0));
+    const progress = progressReporter($("progress"), "Writing firmware", status);
+    status(erase ? "Erasing and writing firmware… keep Coglet plugged in." : "Writing firmware… keep Coglet plugged in.");
+    await conn.loader.writeFlash({
+      fileArray: files.map((f) => ({ data: f.data, address: f.address })),
+      flashMode: "keep", flashFreq: "keep", flashSize: "keep",
+      eraseAll: erase, compress: true,
+      reportProgress: (i, written, size) => progress((before[i] + (written / size) * files[i].data.length) / total),
+      calculateMD5Hash: (image) => md5(image),
+    });
+    $("progress").value = 100;
+    log("done");
+    status("Done! Coglet is restarting with version " + manifest.version + ". Checking its servo board…", "ok");
+    await finishAndWatch(conn, status, showServoBoardNeeded);
+    conn = null;
+  } catch (e) {
+    if (noPort(e)) {
+      status("No port chosen. Click Connect & Update to try again.", "warn");
+    } else {
+      status("The update failed: " + errText(e), "err");
+      $("logbox").open = true;
+    }
+    log("error: " + errText(e));
+  } finally {
+    try { if (conn) await conn.transport.disconnect(); } catch (e) {}
+    busy(false);
+  }
+});
+
+monitorBtn.addEventListener("click", async () => {
+  if (monitorPort) { await stopMonitor(); return; }
+  try {
+    const port = await getPort("esp");
+    logEl.textContent = "";
+    await startMonitor(port, false);
+    status("Showing Coglet's live log. Make the problem happen, then click Copy log.");
+  } catch (e) {
+    if (!noPort(e)) status("Couldn't open the log: " + errText(e), "warn");
+  }
+});
+
+$("copy").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(logEl.textContent);
+    status("The log is copied. Paste it in your message.", "ok");
+  } catch (e) {
+    status("Couldn't copy automatically: click in the log, press Ctrl+A, then Ctrl+C.", "warn");
+  }
+});
+
+// ------------------------------------------------------------------ RP2040 setup
+// Over the RP2040's MicroPython raw REPL: stop the running program, write
+// every file as <name>.tmp, check the sizes, rename them into place, record
+// the bundle id and soft-reboot.
+class RawRepl {
+  constructor(port) { this.port = port; this.buf = ""; this.reader = null; this.writer = null; }
+  async open() {
+    await this.port.open({ baudRate: 115200 });
+    this.writer = this.port.writable.getWriter();
+    this.reader = this.port.readable.getReader();
+    this.decoder = new TextDecoder();
+    this.pump = (async () => {
+      try {
+        for (;;) {
+          const { value, done } = await this.reader.read();
+          if (done) break;
+          this.buf += this.decoder.decode(value, { stream: true });
+        }
+      } catch (e) {}
+    })();
+  }
+  async close() {
+    try { await this.reader.cancel(); } catch (e) {}
+    try { this.reader.releaseLock(); } catch (e) {}
+    try { this.writer.releaseLock(); } catch (e) {}
+    try { await this.port.close(); } catch (e) {}
+  }
+  async write(text) {
+    const bytes = new TextEncoder().encode(text);
+    for (let i = 0; i < bytes.length; i += 256) {      // small pieces, like mpremote
+      await this.writer.write(bytes.slice(i, i + 256));
+      await sleep(5);
+    }
+  }
+  async readUntil(token, timeoutMs) {
+    const t0 = Date.now();
+    for (;;) {
+      const i = this.buf.indexOf(token);
+      if (i >= 0) { const out = this.buf.slice(0, i); this.buf = this.buf.slice(i + token.length); return out; }
+      if (Date.now() - t0 > timeoutMs) throw new Error("no answer from the board (waited for " + JSON.stringify(token) + ")");
+      await sleep(10);
+    }
+  }
+  async enter() {
+    await this.write("\r\x03\x03");                    // stop the running program
+    await sleep(300);
+    await this.write("\r\x03");
+    await sleep(200);
+    this.buf = "";
+    await this.write("\r\x01");                         // raw REPL
+    await this.readUntil("raw REPL; CTRL-B to exit\r\n>", 3000);
+  }
+  async exec(code, timeoutMs = 5000) {
+    await this.write(code);
+    await this.write("\x04");
+    await this.readUntil("OK", timeoutMs);
+    const out = await this.readUntil("\x04", timeoutMs);
+    const err = await this.readUntil("\x04", timeoutMs);
+    await this.readUntil(">", timeoutMs);
+    if (err.trim()) throw new Error(err.trim().split("\n").pop());
+    return out;
+  }
+  async softReboot() {
+    await this.write("\x02");                            // back to the normal REPL
+    await sleep(100);
+    await this.write("\x04");                            // Ctrl-D: soft reboot -> main.py
+    await sleep(300);
+  }
+}
+
+function b64(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s);
+}
+
+rpBtn.addEventListener("click", async () => {
+  if (busyNow) return;
+  await stopMonitor();
+  busy(true);
+  let setupDone = false;
+  $("rpprogress").classList.add("hidden");
+  let repl = null;
+  try {
+    rpStatus("Downloading the servo board program…");
+    const mr = await fetch("rp2040/manifest.json", { cache: "no-store" });
+    if (!mr.ok) throw new Error("couldn't load the servo board files (HTTP " + mr.status + ")");
+    const rpManifest = await mr.json();
+    const files = [];
+    for (const f of rpManifest.files) {
+      const r = await fetch("rp2040/" + f.name, { cache: "no-store" });
+      if (!r.ok) throw new Error("download failed: " + f.name);
+      const data = new Uint8Array(await r.arrayBuffer());
+      if (data.length !== f.size || md5(data) !== f.md5) throw new Error(f.name + " is damaged, please reload the page");
+      files.push({ name: f.name, data });
+    }
+    rpStatus("Choose the RP2040 in the list that appears…");
+    forgetPort("rp");
+    const port = await getPort("rp");
+    repl = new RawRepl(port);
+    await repl.open();
+    rpStatus("Connecting to the servo board…");
+    try {
+      await repl.enter();
+    } catch (e) {
+      throw new Error("the board didn't answer like the servo board. Is the switch on RP2040?");
+    }
+    const platform = (await repl.exec("import sys\nprint(sys.platform)")).trim();
+    if (platform !== "rp2") throw new Error("this port is not the servo board (" + platform + "). Is the switch on RP2040?");
+    log("RP2040 connected (MicroPython " + platform + ")");
+
+    const total = files.reduce((s, f) => s + f.data.length, 0);
+    let sent = 0;
+    const progress = progressReporter($("rpprogress"), "Writing", rpStatus);
+    await repl.exec("import binascii, os");
+    for (const f of files) {
+      rpStatus("Writing " + f.name + "…");
+      await repl.exec("_f=open(" + JSON.stringify(f.name + ".tmp") + ",'wb')");
+      for (let off = 0; off < f.data.length; off += 768) {
+        const piece = f.data.slice(off, off + 768);
+        await repl.exec("_f.write(binascii.a2b_base64('" + b64(piece) + "'))");
+        sent += piece.length;
+        progress((sent / total) * 0.95);
+      }
+      await repl.exec("_f.close()");
+      const size = parseInt((await repl.exec("print(os.stat(" + JSON.stringify(f.name + ".tmp") + ")[6])")).trim(), 10);
+      if (size !== f.data.length) throw new Error(f.name + " was not written completely (" + size + "/" + f.data.length + ")");
+      log("wrote " + f.name + " (" + size + " bytes)");
+    }
+    rpStatus("Installing…");
+    const names = JSON.stringify(files.map((f) => f.name));
+    await repl.exec(
+      "for _n in " + names + ":\n" +
+      "    try:\n        os.remove(_n)\n    except OSError:\n        pass\n" +
+      "    os.rename(_n + '.tmp', _n)\n" +
+      "with open('coglet_bundle.txt', 'w') as _b:\n    _b.write(" + JSON.stringify(rpManifest.bundle_id) + ")\n",
+      15000);
+    $("rpprogress").value = 100;
+    await repl.softReboot();
+    log("RP2040 set up with bundle " + rpManifest.bundle_id);
+    rpStatus("Done! Now unplug Coglet, slide the switch back to ESP, plug it in, and click Check Coglet.", "ok");
+    setupDone = true;
+  } catch (e) {
+    if (noPort(e)) {
+      rpStatus("No port chosen. Click Set up servo board to try again.", "warn");
+    } else {
+      rpStatus("The setup failed: " + errText(e) + (/[.?!]$/.test(errText(e)) ? " " : ". ") +
+               "Nothing was changed if this happened before \"Installing…\".", "err");
+      $("logbox").open = true;
+    }
+    log("rp2040 error: " + errText(e));
+  } finally {
+    if (repl) await repl.close();
+    busy(false);
+    if (setupDone) rpCheckBtn.focus();     // the next thing to do
+  }
+});
+
+// Restart Coglet (switch on ESP) and confirm that the servo board answers.
+rpCheckBtn.addEventListener("click", async () => {
+  if (busyNow) return;
+  try {
+    rpStatus("Choose Coglet (switch on ESP) in the list if asked…");
+    const port = await getPort("esp");
+    logEl.textContent = "";
+    rpStatus("Restarting Coglet and checking its servo board (takes about 10 seconds)…");
+    const w = watchServoBoard((t, k) => {
+      rpStatus(t, k);
+      if (k === "ok") { $("rpcard").classList.remove("attention"); }
+    }, { onNeeded: () => rpStatus("The servo board didn't answer. Run Set up servo board again, " +
+                                  "making sure the switch is on RP2040 while it runs.", "warn") });
+    await startMonitor(port, true);
+    setTimeout(() => {
+      if (watchers.has(w)) {
+        watchers.delete(w);
+        rpStatus("Coglet didn't report on its servo board. Is it running the latest firmware? Update it above, then check again.", "warn");
+      }
+    }, 30000);
+  } catch (e) {
+    if (!noPort(e)) rpStatus("Couldn't open Coglet: " + errText(e), "warn");
+  }
+});
+
+// ------------------------------------------------------------------ songs
+const songState = { device: null, removed: new Set(), pending: [], nextId: 1 };
+const PRESETS = [["auto", "Automatic"], ["energetic", "Energetic"], ["calm", "Calm"]];
+
+function songArea() { return manifest && manifest.songs; }
+function msText(ms) { const s = Math.round(ms / 1000); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }
+
+function keptEntries() {
+  return (songState.device || []).filter((e) => !songState.removed.has(e.ogg_offset));
+}
+function readyPending() { return songState.pending.filter((p) => p.song); }
+
+function spaceNeeded() {
+  return Songs.usedBytes(keptEntries()) + readyPending().reduce((s, p) => s + Songs.blockFootprint(p.song), 0);
+}
+
+function updateSongButtons() {
+  const area = songArea();
+  const working = songState.pending.some((p) => p.working);
+  const changes = readyPending().length > 0 || songState.removed.size > 0;
+  const fits = !area || spaceNeeded() <= area.size;
+  const count = keptEntries().length + readyPending().length;
+  $("songsave").disabled = busyNow || !supported || !area || working || !changes || !fits || count > Songs.LIB_MAX_SONGS;
+  $("songread").disabled = busyNow || !supported || !area;
+  $("songfiles").disabled = !area || !Songs.encoderSupported();
+}
+
+function renderSongs() {
+  const area = songArea();
+  const dev = $("devsongs"), neu = $("newsongs");
+  dev.textContent = ""; neu.textContent = "";
+  if (songState.device) {
+    $("onco-h").classList.remove("hidden");
+    if (!songState.device.length) {
+      const li = document.createElement("li");
+      li.textContent = "No songs on Coglet yet.";
+      li.className = "meta";
+      dev.appendChild(li);
+    }
+    for (const e of songState.device) {
+      const removed = songState.removed.has(e.ogg_offset);
+      const li = document.createElement("li");
+      if (removed) li.className = "removed";
+      li.innerHTML = '<div class="top"><div><div class="name"></div><div class="meta"></div></div><button type="button" class="secondary small"></button></div>';
+      li.querySelector(".name").textContent = e.name;
+      li.querySelector(".meta").textContent = (e.preset === "energetic" ? "Energetic" : "Calm") + " · " + e.bpm +
+        " BPM · " + msText(e.duration_ms) + (removed ? " · will be removed" : "");
+      const btn = li.querySelector("button");
+      btn.textContent = removed ? "Keep" : "Remove";
+      btn.setAttribute("aria-label", (removed ? "Keep " : "Remove ") + e.name);
+      btn.addEventListener("click", () => {
+        if (removed) songState.removed.delete(e.ogg_offset); else songState.removed.add(e.ogg_offset);
+        renderSongs();
+        songStatus(removed ? e.name + " will be kept." : e.name + " will be removed when you save.");
+      });
+      dev.appendChild(li);
+    }
+  }
+  $("new-h").classList.toggle("hidden", songState.pending.length === 0);
+  for (const p of songState.pending) {
+    const li = document.createElement("li");
+    li.innerHTML =
+      '<div class="top"><div><div class="name"></div><div class="meta" aria-live="polite"></div></div>' +
+      '<button type="button" class="secondary small">Remove</button></div>' +
+      '<div class="edit"><label>Name <input type="text" maxlength="40"></label>' +
+      '<label>Dance style <select></select></label></div>';
+    li.querySelector(".name").textContent = p.name || p.file.name;
+    const meta = li.querySelector(".meta");
+    if (p.error) meta.textContent = "Can't use this file: " + p.error;
+    else if (p.working) meta.textContent = p.step || "Waiting…";
+    else {
+      const s = p.song;
+      meta.textContent = (s.preset === "energetic" ? "Energetic" : "Calm") + " · " + s.bpm + " BPM · " +
+        msText(s.duration_ms) + (s.trimmed ? " (shortened)" : "") + " · " + kb(Songs.blockFootprint(s));
+    }
+    const rm = li.querySelector("button");
+    rm.setAttribute("aria-label", "Remove " + (p.name || p.file.name) + " from the new songs");
+    rm.addEventListener("click", () => {
+      songState.pending = songState.pending.filter((q) => q !== p);
+      renderSongs();
+      songStatus("Removed from the new songs.");
+    });
+    if (p.error) { li.querySelector(".edit").remove(); neu.appendChild(li); continue; }
+    const name = li.querySelector("input");
+    name.value = p.name;
+    name.addEventListener("change", () => {
+      p.name = uniqueName(Songs.utf8Name(name.value) || p.name, p);
+      name.value = p.name;
+      li.querySelector(".name").textContent = p.name;
+      updateSongButtons();
+    });
+    const sel = li.querySelector("select");
+    for (const [v, t] of PRESETS) {
+      const o = document.createElement("option");
+      o.value = v;
+      o.textContent = v === "auto" && p.song ? t + " (" + (p.song.info.auto_preset === "energetic" ? "energetic" : "calm") + ")" : t;
+      sel.appendChild(o);
+    }
+    sel.value = p.preset;
+    sel.disabled = !p.song;
+    sel.addEventListener("change", () => {
+      p.preset = sel.value;
+      const forced = p.preset === "auto" ? null : p.preset;
+      const r = Songs.analyse11k(p.song.pcm11k, p.song.seconds, forced, null);
+      Object.assign(p.song, { beats: r.beats, info: r.info, preset: r.info.preset, bpm: Songs.pyRound(r.info.felt_bpm) });
+      renderSongs();
+      songStatus("Dance style of " + p.name + ": " + r.info.preset + ", " + Songs.pyRound(r.info.felt_bpm) + " BPM.");
+    });
+    neu.appendChild(li);
+  }
+  // room meter
+  if (area && (songState.device || songState.pending.length)) {
+    const used = spaceNeeded();
+    $("meter").classList.remove("hidden");
+    const count = keptEntries().length + readyPending().length;
+    $("metertext").textContent = count + (count === 1 ? " song, " : " songs, ") + kb(used) + " of " + kb(area.size) +
+      " used" + (used > area.size ? " — too much: remove a song or add shorter ones" : "") +
+      (count > Songs.LIB_MAX_SONGS ? " — at most " + Songs.LIB_MAX_SONGS + " songs" : "") +
+      (songState.device ? "" : " (plus the songs already on Coglet)");
+    $("meterbar").value = Math.min(100, Math.round((used / area.size) * 100));
+  }
+  updateSongButtons();
+}
+
+function nameFromFile(fileName) {
+  let stem = fileName.replace(/\.[^.]+$/, "");
+  let preset = "auto";
+  for (;;) {
+    const m = /^(.*)\.(calm|energetic|\d+(\.\d+)?bpm)$/i.exec(stem);
+    if (!m) break;
+    if (/^(calm|energetic)$/i.test(m[2])) preset = m[2].toLowerCase();
+    stem = m[1];
+  }
+  return { name: Songs.utf8Name(stem.replace(/[_]+/g, " ")) || "Song", preset };
+}
+
+function uniqueName(name, self) {
+  const taken = new Set([...keptEntries().map((e) => e.name.toLowerCase()),
+                         ...songState.pending.filter((p) => p !== self).map((p) => (p.name || "").toLowerCase())]);
+  if (!taken.has(name.toLowerCase())) return name;
+  for (let i = 2; ; i++) {
+    const n = Songs.utf8Name(name.slice(0, 30) + " " + i);
+    if (!taken.has(n.toLowerCase())) return n;
+  }
+}
+
+let queue = Promise.resolve();
+function addFiles(list) {
+  if (!songArea()) return;
+  if (!Songs.encoderSupported()) { songStatus("This browser can't convert audio. Please use Chrome or Edge.", "err"); return; }
+  for (const file of list) {
+    const guess = nameFromFile(file.name);
+    const p = { id: songState.nextId++, file, name: "", preset: guess.preset, working: true, step: "Waiting…", song: null, error: null };
+    p.name = uniqueName(guess.name, p);
+    songState.pending.push(p);
+    queue = queue.then(async () => {
+      try {
+        p.song = await Songs.makeSong(file, { name: p.name, preset: p.preset }, (step) => { p.step = step; renderSongs(); });
+        p.working = false;
+        renderSongs();
+        songStatus(p.name + " is ready: " + p.song.preset + ", " + p.song.bpm + " BPM.");
+      } catch (e) {
+        p.working = false;
+        p.error = /decode|EncodingError|Unable/i.test(errText(e)) ? "the browser can't read this file" : errText(e);
+        renderSongs();
+        songStatus(file.name + ": " + p.error, "warn");
+      }
+    });
+  }
+  renderSongs();
+  songStatus("Preparing " + list.length + (list.length === 1 ? " song" : " songs") + "…");
+}
+
+$("songfiles").addEventListener("change", (e) => { addFiles(Array.from(e.target.files)); e.target.value = ""; });
+const drop = $("drop");
+drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", (e) => {
+  e.preventDefault();
+  drop.classList.remove("over");
+  addFiles(Array.from(e.dataTransfer.files));
+});
+
+async function checkFlashSize(loader) {
+  const id = await loader.readFlashId();
+  const bytes = 1 << ((id >> 16) & 0xff);
+  const area = songArea();
+  if (bytes < area.offset + area.size) {
+    throw new Error("this Coglet has " + (bytes >> 20) + " MB of flash, too little for songs");
+  }
+}
+
+async function readLibrary(loader) {
+  const area = songArea();
+  const sector = await loader.readFlash(area.offset, Songs.LIB_SECTOR);
+  const h = Songs.parseLibraryHeader(sector);
+  return h ? h.songs : [];
+}
+
+$("songread").addEventListener("click", async () => {
+  if (busyNow || !songArea()) return;
+  busy(true);
+  let conn = null;
+  try {
+    songStatus("Choose Coglet in the list that appears…");
+    conn = await connectEsp(songStatus);
+    await checkFlashSize(conn.loader);
+    songStatus("Reading the songs…");
+    songState.device = await readLibrary(conn.loader);
+    songState.removed.clear();
+    renderSongs();
+    songStatus(songState.device.length ? "Coglet has " + songState.device.length + (songState.device.length === 1 ? " song." : " songs.")
+                                       : "No songs on Coglet yet. Add some below.", "ok");
+    await conn.loader.after("hard_reset");
+    try { await conn.transport.disconnect(); } catch (e) {}
+    conn = null;
+    // Some USB-serial bridges ignore esptool-js's reset: restart Coglet once more.
+    try { await startMonitor(await getPort("esp"), true); await sleep(300); await stopMonitor(); } catch (e) {}
+  } catch (e) {
+    if (noPort(e)) songStatus("No port chosen. Click Show songs on Coglet to try again.", "warn");
+    else songStatus("Couldn't read the songs: " + errText(e), "err");
+  } finally {
+    try { if (conn) await conn.transport.disconnect(); } catch (e) {}
+    busy(false);
+  }
+});
+
+$("songsave").addEventListener("click", async () => {
+  if (busyNow || !songArea()) return;
+  const area = songArea();
+  busy(true);
+  let conn = null;
+  try {
+    for (const p of readyPending()) p.song.name = p.name;
+    songStatus("Choose Coglet in the list that appears…");
+    conn = await connectEsp(songStatus);
+    await checkFlashSize(conn.loader);
+    // Start from what is on Coglet right now.
+    const onDevice = await readLibrary(conn.loader);
+    const removedKeys = new Set((songState.device || []).filter((e) => songState.removed.has(e.ogg_offset))
+                                                       .map((e) => e.ogg_offset + "|" + e.name));
+    const keep = onDevice.filter((e) => !removedKeys.has(e.ogg_offset + "|" + e.name));
+    const adds = readyPending().map((p) => p.song);
+    let plan = Songs.planLibrary(keep, adds, area.size);
+    const progress = progressReporter($("songprogress"), "Saving", songStatus);
+    if (!plan) {
+      // Not enough room after the last song: pack the songs that stay.
+      songStatus("Making room…");
+      for (let i = 0; i < keep.length; i++) {
+        const e = keep[i];
+        const len = e.beats_offset - e.ogg_offset + e.beat_count * 8;
+        e.data = await conn.loader.readFlash(area.offset + e.ogg_offset, len);
+        progress(((i + 1) / keep.length) * 0.3);
+      }
+      plan = Songs.planLibrary(keep, adds, area.size, { compact: true });
+      if (!plan) throw new Error("the songs don't fit. Remove a song or add shorter ones.");
+    }
+    const writes = plan.writes;
+    const total = writes.reduce((s, w) => s + w.data.length, 0);
+    const before = writes.map((w, i) => writes.slice(0, i).reduce((s, x) => s + x.data.length, 0));
+    const base = plan.compact ? 0.3 : 0;
+    songStatus("Saving songs… keep Coglet plugged in.");
+    // The song list (offset 0) is written last, so an interrupted save leaves
+    // the previous songs as they were.
+    await conn.loader.writeFlash({
+      fileArray: writes.map((w) => ({ data: w.data, address: area.offset + w.offset })),
+      flashMode: "keep", flashFreq: "keep", flashSize: "keep",
+      eraseAll: false, compress: true,
+      reportProgress: (i, written, size) => progress(base + (1 - base) * (before[i] + (written / size) * writes[i].data.length) / total),
+      calculateMD5Hash: (image) => md5(image),
+    });
+    $("songprogress").value = 100;
+    songState.device = Songs.parseLibraryHeader(writes[writes.length - 1].data).songs;
+    songState.removed.clear();
+    songState.pending = songState.pending.filter((p) => !p.song);
+    renderSongs();
+    const n = songState.device.length;
+    songStatus("Saved. Coglet is restarting with " + n + (n === 1 ? " song." : " songs."), "ok");
+    const w = (line) => {
+      const m = /CogletMusic: song library: (\d+) songs/.exec(line);
+      if (m) {
+        watchers.delete(w);
+        songStatus("Saved. Coglet found " + m[1] + (m[1] === "1" ? " song" : " songs") + ". Ask it to dance to one!", "ok");
+      } else if (/CogletMusic: song library: (empty|damaged|unknown)/.test(line)) {
+        watchers.delete(w);
+        songStatus("Coglet didn't load the songs. Update Coglet above first (older firmware can't play them), then restart it.", "warn");
+      }
+    };
+    watchers.add(w);
+    setTimeout(() => {
+      if (!watchers.has(w)) return;
+      watchers.delete(w);
+      songStatus("Saved. If Coglet doesn't know the new songs, update it above first (older firmware can't play them).", "warn");
+    }, 30000);
+    await finishAndWatch(conn, status, showServoBoardNeeded);
+    conn = null;
+  } catch (e) {
+    if (noPort(e)) songStatus("No port chosen. Click Save to Coglet to try again.", "warn");
+    else { songStatus("Saving failed: " + errText(e) + " Your songs on Coglet are unchanged unless it stopped halfway; then just save again.", "err"); $("logbox").open = true; }
+    log("songs error: " + errText(e));
+  } finally {
+    try { if (conn) await conn.transport.disconnect(); } catch (e) {}
+    busy(false);
+  }
+});
+
+if (!Songs.encoderSupported() && supported) {
+  $("songsoff").textContent = "This browser can't convert audio. Please use a current Chrome or Edge to add songs.";
+  $("songsoff").classList.remove("hidden");
+}
+
+busy(false);
+loadManifest();
+</script>
+</body>
+</html>

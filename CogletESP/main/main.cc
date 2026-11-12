@@ -11,6 +11,7 @@
 #include "application.h"
 #include "system_info.h"
 #include "uart_component.h"
+#include "coglet_rp2040_sync.h"
 
 #define TAG "main"
 
@@ -61,4 +62,9 @@ extern "C" void app_main(void)
     // Launch the application
     auto& app = Application::GetInstance();
     app.Start();
+
+#if CONFIG_COGLET_RP2040_SYNC
+    // Bring the RP2040's program up to date over the UART link.
+    CogletRp2040::StartSyncTask();
+#endif
 }

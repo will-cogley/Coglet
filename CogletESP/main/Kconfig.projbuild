@@ -873,6 +873,22 @@ menu "NMRobotics Coglet Reminder"
 
 endmenu
 
+# NMRobotics Coglet: automatic RP2040 updates.
+menu "NMRobotics Coglet RP2040"
+
+    config COGLET_RP2040_SYNC
+        bool "Update the RP2040 program automatically"
+        default y
+        help
+            The ESP firmware carries the RP2040 program (CogletESP/RP2040).
+            A few seconds after boot the ESP asks the RP2040 which version it
+            runs and, if it differs, sends the new files over the UART link.
+            The RP2040 stages and verifies them before switching, and keeps
+            its old program if anything goes wrong. The RP2040 needs the
+            one-time setup (web flasher) once, from before this feature.
+
+endmenu
+
 # NMRobotics Coglet: built-in music dance.
 menu "NMRobotics Coglet Dance"
 
@@ -930,11 +946,26 @@ menu "NMRobotics Coglet Dance"
         int "Flash budget for all custom songs (KB)"
         depends on COGLET_MUSIC
         range 100 2500
-        default 1500
+        default 400
         help
-            Songs that do not fit are skipped with a warning. The app
-            partition is 4 MB; check the image size printed by idf.py build
-            before raising this.
+            Songs that do not fit are skipped with a warning. They are
+            compiled into the app, and the 4 MB app partition has roughly
+            this much room left; raising it can make the build fail with
+            "app partitions are too small". Songs added from the web
+            flasher have their own storage (COGLET_MUSIC_LIBRARY_KB).
+
+    config COGLET_MUSIC_LIBRARY_KB
+        int "Song library size (KB, end of the assets partition)"
+        depends on COGLET_MUSIC
+        range 0 4096
+        default 2048
+        help
+            Songs added from the web flasher ("My songs") are stored in the
+            last part of the "assets" partition, which the assets image does
+            not use. Firmware updates never write there, so the songs are
+            kept. 2048 KB holds about 8 one-minute songs. 0 turns the library
+            off. The web flasher reads this value from the build, so keep the
+            published firmware and this setting in step.
 
     config COGLET_MUSIC_BEAT_OFFSET_MS
         int "Beat timing offset (ms)"

@@ -70,6 +70,8 @@ public:
     // Spoken reminder: the MCP tool self.coglet.reminder.last_due calls this
     // once the LLM has fetched the reminder text (any thread).
     void OnReminderTextDelivered() { reminder_text_delivered_ = true; }
+    // Re-send the current state line after the RP2040 restarted (update).
+    void ResendStateToRp2040();
 #if CONFIG_COGLET_DANCE
     // MCP tool self.coglet.dance (any thread). style: mecha/evil/cat/random.
     // Returns the resolved style, or "" if a dance is already in progress.

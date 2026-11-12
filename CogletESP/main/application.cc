@@ -905,9 +905,9 @@ std::string Application::RequestDance(const std::string& style) {
     std::string resolved = style;
 #if CONFIG_COGLET_MUSIC
     dance_song_ = nullptr;
-    if (CogletMusic::kSongCount > 0 &&
+    if (CogletMusic::Count() > 0 &&
         (style == "mine" || style == "my" || style == "custom" || style == "random_custom")) {
-        dance_song_ = &CogletMusic::kSongs[esp_random() % CogletMusic::kSongCount];
+        dance_song_ = CogletMusic::At(esp_random() % CogletMusic::Count());
     } else if (CogletSounds::Dance(style).empty()) {
         dance_song_ = CogletMusic::FindLoose(style);
     }
@@ -1139,6 +1139,15 @@ void Application::UpdateDance() {
     }
 }
 #endif  // CONFIG_COGLET_DANCE
+
+void Application::ResendStateToRp2040() {
+    switch (device_state_) {
+    case kDeviceStateIdle: uart_send_string("idle"); break;
+    case kDeviceStateListening: uart_send_string("listening"); break;
+    case kDeviceStateSpeaking: uart_send_string("speaking"); break;
+    default: break;
+    }
+}
 
 void Application::AdvanceStaggeredWakeTick() {
     if (wake_session_stage_ != WakeSessionStage::Prepare &&

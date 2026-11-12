@@ -2,6 +2,12 @@
 
 Drop your own songs here and Coglet can dance to them.
 
+**Easier:** the *My songs* section of the web flasher adds songs without
+ESP-IDF or ffmpeg, and keeps them through firmware updates. This folder is for
+people who build their own firmware. Note that updating Coglet from the web
+flasher installs the official firmware, which replaces your build and the
+songs compiled into it; the files here stay, so rebuild to get them back.
+
 1. Copy audio files into this folder: mp3, wav, flac, m4a, aac, ogg, opus,
    wma, aiff, or a video file (mp4, mov, m4v, webm, mkv; its audio is used).
 2. Run `idf.py build`. Each song is converted for Coglet's speaker, its beats
@@ -32,7 +38,10 @@ Free Fall.calm.68bpm.m4a
 ## Limits (menuconfig → NMRobotics Coglet Dance)
 
 * 60 s per song by default (longer songs are cut with a fade-out);
-* 1500 KB for all songs together (~6 minutes at 32 kbps).
+* 400 KB for all songs together (~1.5 minutes at 32 kbps): that is about
+  what the 4 MB app partition has left. If the build stops with "app
+  partitions are too small", remove a song or use the web flasher's
+  *My songs* instead, which has its own 2 MB.
 
 ## Copyright
 

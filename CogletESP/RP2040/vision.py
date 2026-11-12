@@ -595,7 +595,7 @@ class EyeFollower:
     X: face direction -> EYL + EYR, base YAW takes over beyond the eye limit
     Y: face direction -> PIT
 
-    The class name stays EyeFollower for main.py compatibility.
+    The class name stays EyeFollower for app.py compatibility.
     """
 
     def __init__(self, servos):
