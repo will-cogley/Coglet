@@ -141,8 +141,14 @@ the option off while experimenting).
 ## For maintainers
 
 ### One-time setup
-In the GitHub repository: **Settings → Pages → Build and deployment →
-Source: GitHub Actions**.
+In the GitHub repository (admin rights needed):
+
+1. **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+2. **Settings → Environments → github-pages → Deployment branches and tags →
+   Add deployment branch or tag rule → Ref type: Tag, pattern `v*`**.
+   By default only `main` may deploy the page, so without this rule a
+   release tag builds fine but its deploy job is rejected ("not allowed to
+   deploy to github-pages due to environment protection rules").
 
 ### Publishing a release
 Push a version tag:
