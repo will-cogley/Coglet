@@ -1,0 +1,70 @@
+# Builds the Coglet ESP32-S3 firmware and publishes it:
+#   * GitHub Pages: the web flasher (CogletESP/tools/web_flasher) + firmware parts
+#   * GitHub Release: a zip of the parts (on version tags only)
+#
+# Runs on version tags (v1.2.3) and can be started by hand from the Actions tab.
+# One-time setup: Settings -> Pages -> Build and deployment -> Source: GitHub Actions.
+name: Firmware
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write     # create the release
+  pages: write        # deploy GitHub Pages
+  id-token: write     # required by deploy-pages
+
+concurrency:
+  group: firmware-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.5.3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build firmware
+        shell: bash
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          . "$IDF_PATH/export.sh"
+          cd CogletESP
+          idf.py build
+
+      - name: Collect parts, manifest and web page
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          VERSION="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then VERSION="dev-${GITHUB_SHA::7}"; fi
+          python CogletESP/tools/web_flasher/make_manifest.py \
+            --build CogletESP/build --site site --release-dir release \
+            --version "$VERSION" --commit "${GITHUB_SHA::7}" --repo "${GITHUB_REPOSITORY}"
+          python CogletESP/tools/rp2040_bundle/build_bundle.py \
+            --src CogletESP/RP2040 --site site/rp2040
+          cp CogletESP/tools/web_flasher/index.html CogletESP/tools/web_flasher/coglet_songs.js site/
+          touch site/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Attach to the release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.zip
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
