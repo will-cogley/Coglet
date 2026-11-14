@@ -48,6 +48,8 @@ private:
     int duration_ = 3000;
     float threshold_ = 0.2;
     std::deque<Command> commands_;
+    std::string settings_wake_word_;   // from the web flasher's Settings (coglet_settings.h)
+    std::string fallback_wake_word_;   // firmware default, used if the settings word fails
  
     std::function<void(const std::string& wake_word)> wake_word_detected_callback_;
     AudioCodec* codec_ = nullptr;

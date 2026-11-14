@@ -1,30 +1,19 @@
-// NMRobotics Coglet - compile-time sound selection from menuconfig.
-// Only the selected startup and reminder headers are included in this
-// translation unit, so unused sound arrays are not linked into firmware.
+// NMRobotics Coglet - sounds.
+// All three startup and all three reminder sounds are linked in: menuconfig
+// sets the defaults and the web flasher's Settings can change them
+// (coglet_settings.h).
 #pragma once
 
 #include <string_view>
 #include "sdkconfig.h"
+#include "coglet_settings.h"
 
-#if defined(CONFIG_COGLET_BOOT_SOUND_MECHA)
-#  include "coglet_sounds/coglet_mecha_boot_chime.h"
-#elif defined(CONFIG_COGLET_BOOT_SOUND_EVIL)
-#  include "coglet_sounds/coglet_evil_boot_chime.h"
-#elif defined(CONFIG_COGLET_BOOT_SOUND_CAT)
-#  include "coglet_sounds/coglet_cat_boot_chime.h"
-#else
-#  error "Please select a Coglet Startup Sound in menuconfig"
-#endif
-
-#if defined(CONFIG_COGLET_REMINDER_SOUND_MECHA)
-#  include "coglet_sounds/coglet_mecha_reminder_chime.h"
-#elif defined(CONFIG_COGLET_REMINDER_SOUND_EVIL)
-#  include "coglet_sounds/coglet_evil_reminder_chime.h"
-#elif defined(CONFIG_COGLET_REMINDER_SOUND_CAT)
-#  include "coglet_sounds/coglet_reminder_chime.h"
-#else
-#  error "Please select a Coglet Reminder Sound in menuconfig"
-#endif
+#include "coglet_sounds/coglet_mecha_boot_chime.h"
+#include "coglet_sounds/coglet_evil_boot_chime.h"
+#include "coglet_sounds/coglet_cat_boot_chime.h"
+#include "coglet_sounds/coglet_mecha_reminder_chime.h"
+#include "coglet_sounds/coglet_evil_reminder_chime.h"
+#include "coglet_sounds/coglet_reminder_chime.h"
 
 #if CONFIG_COGLET_DANCE
 #  include "coglet_sounds/coglet_dance_mecha.h"
@@ -44,44 +33,58 @@ inline std::string_view Dance(std::string_view style) {
 }
 #endif
 
-inline std::string_view Boot() {
-#if defined(CONFIG_COGLET_BOOT_SOUND_MECHA)
-    return CogletMechaBootChime::Ogg();
-#elif defined(CONFIG_COGLET_BOOT_SOUND_EVIL)
-    return CogletEvilBootChime::Ogg();
+// "mecha" | "evil" | "cat": from Settings, else the menuconfig choice.
+inline std::string_view StartupStyle() {
+    const std::string& chosen = CogletSettings::Get().startup;
+    if (!chosen.empty()) return chosen;
+#if defined(CONFIG_COGLET_BOOT_SOUND_EVIL)
+    return "evil";
+#elif defined(CONFIG_COGLET_BOOT_SOUND_CAT)
+    return "cat";
 #else
-    return CogletCatBootChime::Ogg();
+    return "mecha";
 #endif
 }
 
+inline std::string_view Boot() {
+    const auto style = StartupStyle();
+    if (style == "evil") return CogletEvilBootChime::Ogg();
+    if (style == "cat") return CogletCatBootChime::Ogg();
+    return CogletMechaBootChime::Ogg();
+}
+
 inline const char* BootName() {
-#if defined(CONFIG_COGLET_BOOT_SOUND_MECHA)
+    const auto style = StartupStyle();
+    if (style == "evil") return "Evil Startup";
+    if (style == "cat") return "Cat Startup";
     return "Mecha Startup";
-#elif defined(CONFIG_COGLET_BOOT_SOUND_EVIL)
-    return "Evil Startup";
+}
+
+// "mecha" | "evil" | "cat": from Settings, else the menuconfig choice.
+inline std::string_view ReminderStyle() {
+    const std::string& chosen = CogletSettings::Get().reminder;
+    if (!chosen.empty()) return chosen;
+#if defined(CONFIG_COGLET_REMINDER_SOUND_EVIL)
+    return "evil";
+#elif defined(CONFIG_COGLET_REMINDER_SOUND_CAT)
+    return "cat";
 #else
-    return "Cat Startup";
+    return "mecha";
 #endif
 }
 
 inline std::string_view Reminder() {
-#if defined(CONFIG_COGLET_REMINDER_SOUND_MECHA)
+    const auto style = ReminderStyle();
+    if (style == "evil") return CogletEvilReminderChime::Ogg();
+    if (style == "cat") return CogletReminderChime::Ogg();
     return CogletMechaReminderChime::Ogg();
-#elif defined(CONFIG_COGLET_REMINDER_SOUND_EVIL)
-    return CogletEvilReminderChime::Ogg();
-#else
-    return CogletReminderChime::Ogg();
-#endif
 }
 
 inline const char* ReminderName() {
-#if defined(CONFIG_COGLET_REMINDER_SOUND_MECHA)
+    const auto style = ReminderStyle();
+    if (style == "evil") return "Evil Reminder";
+    if (style == "cat") return "Cat Reminder (Gentle Chime)";
     return "Mecha Reminder";
-#elif defined(CONFIG_COGLET_REMINDER_SOUND_EVIL)
-    return "Evil Reminder";
-#else
-    return "Cat Reminder (Gentle Chime)";
-#endif
 }
 
 }  // namespace CogletSounds

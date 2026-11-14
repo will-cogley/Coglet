@@ -654,7 +654,9 @@ config CUSTOM_WAKE_WORD_THRESHOLD
     range 1 99
     depends on USE_CUSTOM_WAKE_WORD
     help
-        Custom Wake Word Threshold, range 1-99, the smaller the more sensitive, default 20
+        Custom Wake Word Threshold, range 1-99, the smaller the more sensitive, default 20.
+            The web flasher's Settings can override this (and the wake word)
+            without rebuilding.
 
 config SEND_WAKE_WORD_DATA
     bool "Send Wake Word Data"
@@ -987,8 +989,9 @@ menu "NMRobotics Coglet Sounds"
         prompt "Startup Sound"
         default COGLET_BOOT_SOUND_MECHA
         help
-            Select the startup sound. Independent of the device shell.
-            This is a build-time setting; rebuild and flash to change it.
+            Default startup sound. Independent of the device shell. All three
+            are in the firmware; the web flasher's Settings can switch between
+            them without rebuilding.
 
         config COGLET_BOOT_SOUND_MECHA
             bool "Mecha Startup (Rider Awakening V2)"
@@ -1005,8 +1008,10 @@ menu "NMRobotics Coglet Sounds"
         prompt "Reminder Sound"
         default COGLET_REMINDER_SOUND_MECHA
         help
-            Select only the sound played when a local Reminder fires.
-            Reminder MCP, local timing and NVS persistence are always on.
+            Default sound played when a local Reminder fires. All three are
+            in the firmware; the web flasher's Settings can switch between
+            them without rebuilding. Reminder MCP, local timing and NVS
+            persistence are always on.
 
         config COGLET_REMINDER_SOUND_MECHA
             bool "Mecha Reminder (Rider Signal V2)"

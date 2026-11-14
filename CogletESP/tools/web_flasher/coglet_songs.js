@@ -724,3 +724,71 @@ export function planLibrary(keep, add, areaSize, { compact = false } = {}) {
 export function usedBytes(entries) {
   return LIB_SECTOR + entries.reduce((s, e) => s + alignUp(e.beats_offset - e.ogg_offset + e.beat_count * 8), 0);
 }
+
+// ------------------------------------------------------------ settings sector
+// Layout: main/coglet_settings.h. "CGST", u16 version, u16 length, u32 CRC-32,
+// then "key=value" lines.
+export const SETTINGS_SIZE = 4096;
+export const SOUNDS = ["mecha", "evil", "cat"];   // startup and reminder sounds
+export const REMINDERS = SOUNDS;
+
+// Lowercase English letters, apostrophes and single spaces, 3-40 characters.
+export function cleanWakeWord(text) {
+  return String(text || "").toLowerCase().replace(/[’`]/g, "'").replace(/[^a-z' ]+/g, " ")
+    .replace(/\s+/g, " ").trim();
+}
+export function validWakeWord(phrase) {
+  return phrase.length >= 3 && phrase.length <= 40 && /^[a-z' ]+$/.test(phrase) && /[a-z]/.test(phrase) &&
+    !/ {2}/.test(phrase) && phrase === phrase.trim();
+}
+
+export function settingsSector({ wake_word, threshold, startup, reminder }) {
+  const lines = [];
+  if (wake_word) {
+    if (!validWakeWord(wake_word)) throw new Error("the wake word can only use English letters and spaces");
+    lines.push("wake_word=" + wake_word);
+  }
+  if (threshold) {
+    const t = Math.round(threshold);
+    if (t < 1 || t > 99) throw new Error("the sensitivity must be between 1 and 99");
+    lines.push("threshold=" + t);
+  }
+  if (startup) {
+    if (!SOUNDS.includes(startup)) throw new Error("unknown startup sound");
+    lines.push("startup=" + startup);
+  }
+  if (reminder) {
+    if (!SOUNDS.includes(reminder)) throw new Error("unknown reminder sound");
+    lines.push("reminder=" + reminder);
+  }
+  const text = new TextEncoder().encode(lines.join("\n") + "\n");
+  const s = new Uint8Array(SETTINGS_SIZE).fill(0xff);
+  const dv = new DataView(s.buffer);
+  s.set([0x43, 0x47, 0x53, 0x54], 0);   // "CGST"
+  dv.setUint16(4, 1, true);
+  dv.setUint16(6, text.length, true);
+  dv.setUint32(8, crc32(text), true);
+  s.set(text, 12);
+  return s;
+}
+
+// Returns {wake_word, threshold, startup, reminder} (missing values left out) or null.
+export function parseSettings(sector) {
+  if (sector.length < 12 || String.fromCharCode(sector[0], sector[1], sector[2], sector[3]) !== "CGST") return null;
+  const dv = new DataView(sector.buffer, sector.byteOffset, sector.byteLength);
+  const len = dv.getUint16(6, true);
+  if (dv.getUint16(4, true) !== 1 || 12 + len > sector.length) return null;
+  const text = sector.subarray(12, 12 + len);
+  if (crc32(text) !== dv.getUint32(8, true)) return null;
+  const out = {};
+  for (const line of new TextDecoder().decode(text).split("\n")) {
+    const i = line.indexOf("=");
+    if (i < 0) continue;
+    const k = line.slice(0, i), v = line.slice(i + 1);
+    if (k === "wake_word" && validWakeWord(v)) out.wake_word = v;
+    if (k === "threshold" && /^\d{1,2}$/.test(v) && +v >= 1) out.threshold = +v;
+    if (k === "startup" && SOUNDS.includes(v)) out.startup = v;
+    if (k === "reminder" && SOUNDS.includes(v)) out.reminder = v;
+  }
+  return out;
+}

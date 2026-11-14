@@ -91,6 +91,10 @@
   figure.board { margin: 16px 0 8px; }
   figure.board svg { display: block; width: 100%; max-width: 560px; height: auto; border-radius: 12px; background: #fff; border: 1px solid var(--line); }
   figure.board figcaption { color: var(--muted); font-size: 0.92rem; margin-top: 8px; max-width: 560px; }
+  .fields { display: grid; gap: 4px; margin-top: 14px; max-width: 520px; }
+  .fields label { font-weight: 600; margin-top: 10px; }
+  .fields .note { margin: 2px 0 0; }
+  input[type="range"] { width: 100%; min-height: 32px; accent-color: var(--accent); }
   /* songs */
   .drop {
     display: block; position: relative; border: 2px dashed var(--muted); border-radius: 12px; padding: 18px;
@@ -212,6 +216,43 @@
     <div id="rpstatus" class="status" role="status" aria-live="polite"></div>
   </section>
 
+  <section class="card" id="setcard" aria-labelledby="set-h">
+    <h2 id="set-h">Settings</h2>
+    <p>Change Coglet's wake word, how easily it wakes up, and its startup and reminder sounds. Settings are stored on Coglet and kept through updates.</p>
+    <div id="setoff" class="callout note hidden"></div>
+    <div class="row" style="margin-top:6px">
+      <button type="button" id="setread" class="secondary">Show Coglet's settings</button>
+    </div>
+    <div class="fields">
+      <label for="ww">Wake word</label>
+      <input type="text" id="ww" maxlength="40" autocomplete="off" spellcheck="false" aria-describedby="ww-help">
+      <p class="note" id="ww-help">English words, for example <i>hey coglet</i> or <i>hello robot</i>. Two or three distinct words work best. <i>hello coglet</i> also understands several accents.</p>
+
+      <label for="thr">Wake-up sensitivity: <b id="thr-value"></b></label>
+      <input type="range" id="thr" min="1" max="50" step="1" aria-describedby="thr-help">
+      <p class="note" id="thr-help">Lower numbers wake up more easily, but also by mistake more often (TV, conversations). Try 3 if Coglet often misses you, 10 if it wakes up by itself.</p>
+
+      <label for="boot">Startup sound</label>
+      <select id="boot">
+        <option value="mecha">Mecha (Rider Awakening)</option>
+        <option value="evil">Evil (Devil Awakening)</option>
+        <option value="cat">Cat (Neko Boot)</option>
+      </select>
+
+      <label for="rem">Reminder sound</label>
+      <select id="rem">
+        <option value="mecha">Mecha (Rider Signal)</option>
+        <option value="evil">Evil (Devil's Invitation)</option>
+        <option value="cat">Cat (Gentle Chime)</option>
+      </select>
+    </div>
+    <div class="row" style="margin-top:16px">
+      <button type="button" id="setsave">Save to Coglet</button>
+      <button type="button" id="setdefaults" class="secondary">Use defaults</button>
+    </div>
+    <div id="setstatus" class="status" role="status" aria-live="polite"></div>
+  </section>
+
   <section class="card" id="songcard" aria-labelledby="songs-h">
     <h2 id="songs-h">My songs</h2>
     <p>Add your own music and ask Coglet to dance to it, for example <i>"dance to Night Rain"</i> or <i>"dance to one of my songs"</i>. Coglet finds the beat by itself and picks a dance style: <b>energetic</b> (big moves, eyes join in) or <b>calm</b> (gentle sway). The songs are stored on Coglet and kept through updates.</p>
@@ -257,6 +298,8 @@
       Yes: <b>Connect &amp; Update</b> installs the official firmware. Songs in your <code>Music</code> folder are compiled into your own build, so they are replaced too; the files on your computer are not touched, and rebuilding brings them back. Songs added on this page are stored separately and kept. To keep your own changes, merge the new version into your code and build it yourself.</div></details>
     <details class="faq"><summary>How many songs fit, and why does a song dance oddly?</summary><div>
       About 8 one-minute songs (2 MB); the bar above shows the room left. If the moves feel wrong for a song, change its style to <b>energetic</b> or <b>calm</b> before saving: calm songs are danced on the slow, felt beat.</div></details>
+    <details class="faq"><summary>Coglet doesn't wake up (or wakes up by itself)</summary><div>
+      Under <b>Settings</b>, lower the wake-up sensitivity number (for example to 3) if Coglet often misses you, or raise it (for example to 10) if it wakes up by itself. You can also pick a different wake word there. Speak at a normal distance, facing Coglet.</div></details>
     <details class="faq"><summary>After updating, Coglet says a 6-digit code</summary><div>
       Coglet needs to be paired with xiaozhi.me again. This only happens after a fresh install.</div></details>
     <details class="faq"><summary>The servo board setup can't connect</summary><div>
@@ -322,7 +365,10 @@ const kb = (n) => Math.round(n / 1024).toLocaleString() + " KB";
 let busyNow = false;
 function busy(on) {
   busyNow = on;
-  for (const b of [flashBtn, monitorBtn, rpBtn, rpCheckBtn, $("songread")]) b.disabled = on || !supported;
+  for (const b of [flashBtn, monitorBtn, rpBtn, rpCheckBtn, $("songread"), $("setread"), $("setsave")]) {
+    b.disabled = on || !supported;
+  }
+  if (!manifest || !manifest.settings) { $("setread").disabled = true; $("setsave").disabled = true; }
   if (on) flashBtn.disabled = true; else flashBtn.disabled = !supported || !manifest;
   updateSongButtons();
 }
@@ -369,6 +415,7 @@ async function loadManifest() {
       const a2 = a.cloneNode(true); a2.textContent = tag ? "Release notes for " + manifest.version : "Recent changes on GitHub";
       w.appendChild(a2);
     }
+    setupSettingsCard();
     if (!manifest.songs) {
       $("songsoff").textContent = "This firmware build has no song storage, so songs can't be added here.";
       $("songsoff").classList.remove("hidden");
@@ -1125,6 +1172,135 @@ $("songsave").addEventListener("click", async () => {
     if (noPort(e)) songStatus("No port chosen. Click Save to Coglet to try again.", "warn");
     else { songStatus("Saving failed: " + errText(e) + " Your songs on Coglet are unchanged unless it stopped halfway; then just save again.", "err"); $("logbox").open = true; }
     log("songs error: " + errText(e));
+  } finally {
+    try { if (conn) await conn.transport.disconnect(); } catch (e) {}
+    busy(false);
+  }
+});
+
+
+// ------------------------------------------------------------------ settings
+const settingsStatus = (t, k) => setStatus($("setstatus"), t, k);
+function settingsArea() { return manifest && manifest.settings; }
+function showThreshold() {
+  const v = +$("thr").value;
+  $("thr-value").textContent = v + (v <= 3 ? " (very easy to wake)" : v <= 8 ? " (easy)" : v <= 20 ? " (normal)" : " (hard to wake)");
+}
+function fillSettings(values) {
+  const d = (settingsArea() && settingsArea().defaults) || {};
+  $("ww").value = values.wake_word || d.wake_word || "hello coglet";
+  $("thr").value = values.threshold || d.threshold || 5;
+  $("boot").value = values.startup || d.startup || "mecha";
+  $("rem").value = values.reminder || d.reminder || "mecha";
+  showThreshold();
+}
+$("thr").addEventListener("input", showThreshold);
+$("ww").addEventListener("change", () => { $("ww").value = Songs.cleanWakeWord($("ww").value); });
+$("setdefaults").addEventListener("click", () => {
+  fillSettings({});
+  settingsStatus("Default values filled in. Click Save to Coglet to use them.");
+});
+
+function setupSettingsCard() {
+  const area = settingsArea();
+  const off = $("setoff");
+  if (!area) {
+    off.textContent = "This firmware build has no settings storage.";
+    off.classList.remove("hidden");
+  } else if (area.defaults && area.defaults.custom_wake_word === false) {
+    off.textContent = "This firmware build uses a fixed wake word model, so only the sounds can be changed here.";
+    off.classList.remove("hidden");
+    $("ww").disabled = true;
+    $("thr").disabled = true;
+  }
+  fillSettings({});
+}
+
+$("setread").addEventListener("click", async () => {
+  if (busyNow || !settingsArea()) return;
+  busy(true);
+  let conn = null;
+  try {
+    settingsStatus("Choose Coglet in the list that appears…");
+    conn = await connectEsp(settingsStatus);
+    const sector = await conn.loader.readFlash(settingsArea().offset, Songs.SETTINGS_SIZE);
+    const values = Songs.parseSettings(sector);
+    fillSettings(values || {});
+    settingsStatus(values ? "These are Coglet's current settings." : "Coglet uses the default settings.", "ok");
+    await conn.loader.after("hard_reset");
+    try { await conn.transport.disconnect(); } catch (e) {}
+    conn = null;
+    try { await startMonitor(await getPort("esp"), true); await sleep(300); await stopMonitor(); } catch (e) {}
+  } catch (e) {
+    if (noPort(e)) settingsStatus("No port chosen. Click Show Coglet's settings to try again.", "warn");
+    else settingsStatus("Couldn't read the settings: " + errText(e), "err");
+  } finally {
+    try { if (conn) await conn.transport.disconnect(); } catch (e) {}
+    busy(false);
+  }
+});
+
+$("setsave").addEventListener("click", async () => {
+  if (busyNow || !settingsArea()) return;
+  const wake = Songs.cleanWakeWord($("ww").value);
+  $("ww").value = wake;
+  if (!$("ww").disabled && !Songs.validWakeWord(wake)) {
+    settingsStatus("The wake word needs 3 to 40 English letters (spaces are fine).", "err");
+    $("ww").focus();
+    return;
+  }
+  let sector;
+  try {
+    sector = Songs.settingsSector({
+      wake_word: $("ww").disabled ? "" : wake,
+      threshold: $("thr").disabled ? 0 : +$("thr").value,
+      startup: $("boot").value,
+      reminder: $("rem").value,
+    });
+  } catch (e) {
+    settingsStatus(errText(e), "err");
+    return;
+  }
+  busy(true);
+  let conn = null;
+  try {
+    settingsStatus("Choose Coglet in the list that appears…");
+    conn = await connectEsp(settingsStatus);
+    settingsStatus("Saving…");
+    await conn.loader.writeFlash({
+      fileArray: [{ data: sector, address: settingsArea().offset }],
+      flashMode: "keep", flashFreq: "keep", flashSize: "keep",
+      eraseAll: false, compress: true,
+      reportProgress: () => {},
+      calculateMD5Hash: (image) => md5(image),
+    });
+    settingsStatus("Saved. Coglet is restarting…", "ok");
+    const w = (line) => {
+      if (/CogletSettings: settings: wake word/.test(line)) {
+        // keep listening: the wake word itself is checked a moment later
+        settingsStatus("Saved. Say \"" + ($("ww").disabled ? "your wake word" : wake) + "\" to wake Coglet up.", "ok");
+      } else if (/from settings can't be used/.test(line)) {
+        watchers.delete(w);
+        const m = /using "([^"]+)"/.exec(line);
+        settingsStatus("Coglet couldn't use \"" + wake + "\" as a wake word, so it still answers to \"" +
+                       (m ? m[1] : "its usual wake word") + "\". Please try other words or another spelling.", "warn");
+      } else if (/Wake word from settings:|Hello Coglet variant:/.test(line)) {
+        setTimeout(() => watchers.delete(w), 3000);
+      }
+    };
+    watchers.add(w);
+    setTimeout(() => {
+      if (!watchers.has(w)) return;
+      watchers.delete(w);
+      if (!/^Saved\. Say/.test($("setstatus").textContent)) {
+        settingsStatus("Saved. If Coglet doesn't use the new settings, update it above first (older firmware ignores them).", "warn");
+      }
+    }, 30000);
+    await finishAndWatch(conn, status, showServoBoardNeeded);
+    conn = null;
+  } catch (e) {
+    if (noPort(e)) settingsStatus("No port chosen. Click Save to Coglet to try again.", "warn");
+    else settingsStatus("Saving failed: " + errText(e), "err");
   } finally {
     try { if (conn) await conn.transport.disconnect(); } catch (e) {}
     busy(false);

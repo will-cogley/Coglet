@@ -1,7 +1,7 @@
-# Coglet Web Flasher, automatic RP2040 updates and "My songs"
+# Coglet Web Flasher, automatic RP2040 updates, Settings and "My songs"
 
-Update Coglet and add your own songs from the browser, with no ESP-IDF,
-Thonny or ffmpeg install. Flashing the ESP32-S3 is all users ever need to do:
+Update Coglet, change its wake word and reminder sound, and add your own songs
+from the browser, with no ESP-IDF, Thonny or ffmpeg install. Flashing the ESP32-S3 is all users ever need to do:
 the ESP then keeps the RP2040 (servo board) up to date by itself.
 
 **Page:** https://will-cogley.github.io/Coglet/
@@ -20,11 +20,12 @@ The page remembers the choice by USB id, also after replugging or reloading;
 a port that turns out wrong (not an ESP32-S3, or no answer) is forgotten so
 the next try asks again.
 
-Wi-Fi settings, the xiaozhi.me pairing, reminders and songs added on the
-page are kept: only the bootloader, partition table, OTA data, app and assets
-images are written, never the NVS partition or the song library.
+Wi-Fi settings, the xiaozhi.me pairing, reminders, and the settings and songs
+saved on the page are kept: only the bootloader, partition table, OTA data,
+app and assets images are written, never the NVS partition, the settings
+sector or the song library.
 **Advanced options → Fresh install** erases the whole chip first (Wi-Fi,
-pairing and songs then need to be set up again).
+pairing, settings and songs then need to be set up again).
 
 After an update the page restarts Coglet, shows its boot log and reads it:
 
@@ -56,6 +57,37 @@ The page stops the running program through MicroPython's raw REPL, writes
 every file as `<name>.tmp`, checks the sizes, renames them into place,
 records the bundle id in `coglet_bundle.txt` and soft-reboots the RP2040.
 Nothing is replaced until every file has been written.
+
+## Settings
+
+The *Settings* card changes, without rebuilding:
+
+| Setting | Values | Replaces menuconfig |
+|---|---|---|
+| Wake word | English words, e.g. `hey coglet` (lowercase letters, `'` and spaces, 3-40 characters) | Custom Wake Word |
+| Wake-up sensitivity | 1-50 (lower wakes up more easily) | Custom Wake Word Threshold |
+| Startup sound | Mecha, Evil, Cat | Startup Sound |
+| Reminder sound | Mecha, Evil, Cat | Reminder Sound |
+
+The wake word is plain text: the MultiNet model on Coglet turns it into
+phonemes itself, so any English phrase works without a list. `hello coglet`
+keeps its extra accent variants (`main/audio/wake_words/custom_wake_word.cc`).
+If the model can't use a phrase (an odd spelling it can't turn into
+phonemes), Coglet falls back to the firmware's own wake word and logs
+`Wake word "..." from settings can't be used`; the page shows that too, so
+Coglet can always still be woken up. All three startup and all three
+reminder sounds are in the firmware (about 40 KB more than one of each), so
+switching needs no rebuild.
+
+Settings are one 4 KB sector right before the song library
+(`main/coglet_settings.h`): `CGST`, version, length, CRC-32, then
+`key=value` lines. Missing or invalid values fall back to the menuconfig
+defaults, which `make_manifest.py` publishes in `manifest.json` so the page
+can show them. Firmware updates never write there. At boot:
+
+```
+I (900) CogletSettings: settings: wake word "hey coglet", threshold 3, startup cat, reminder evil
+```
 
 ## My songs
 

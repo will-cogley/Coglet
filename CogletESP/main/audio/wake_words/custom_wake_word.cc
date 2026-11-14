@@ -2,6 +2,7 @@
 #include "audio_service.h"
 #include "system_info.h"
 #include "assets.h"
+#include "coglet_settings.h"
 
 #include <esp_log.h>
 #include <esp_mn_iface.h>
@@ -122,6 +123,34 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
 #endif
 #endif
 
+    // Settings from the web flasher replace the configured wake phrase and
+    // threshold (coglet_settings.h). "hello coglet" keeps its accent variants.
+    {
+        const auto& settings = CogletSettings::Get();
+        if (settings.threshold > 0) {
+            threshold_ = settings.threshold / 100.0f;
+            ESP_LOGI(TAG, "Wake word threshold from settings: %d%%", settings.threshold);
+        }
+        if (!settings.wake_word.empty()) {
+            std::string display = settings.wake_word;
+            bool start = true;
+            for (auto& c : display) {
+                if (start && c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+                start = (c == ' ');
+            }
+            std::deque<Command> kept;
+            for (const auto& item : commands_) {
+                if (item.action != "wake") kept.push_back(item);
+                else if (fallback_wake_word_.empty()) fallback_wake_word_ = item.command;
+            }
+            if (fallback_wake_word_.empty()) fallback_wake_word_ = "hello coglet";
+            settings_wake_word_ = settings.wake_word;
+            kept.push_back({settings.wake_word, display, "wake"});
+            commands_ = kept;
+            ESP_LOGI(TAG, "Wake word from settings: %s", settings.wake_word.c_str());
+        }
+    }
+
     if (models_ == nullptr || models_->num == -1) {
         ESP_LOGE(TAG, "Failed to initialize wakenet model");
         return false;
@@ -213,9 +242,25 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
                 }
             }
         } else {
-            esp_mn_commands_add(
+            esp_err_t err = esp_mn_commands_add(
                 i + 1, commands_[i].command.c_str()
             );
+            if (err != ESP_OK && commands_[i].command == settings_wake_word_) {
+                // A wake word from the web flasher that the model can't turn
+                // into phonemes: fall back to the firmware's own wake word, so
+                // Coglet can always be woken up.
+                ESP_LOGE(TAG, "Wake word \"%s\" from settings can't be used (err=%d), using \"%s\"",
+                         settings_wake_word_.c_str(), static_cast<int>(err), fallback_wake_word_.c_str());
+                commands_[i].command = fallback_wake_word_;
+                commands_[i].text = fallback_wake_word_;
+                if (fallback_wake_word_ == "hello coglet") {
+                    for (const auto& variant : kHelloCogletVariants) {
+                        esp_mn_commands_phoneme_add(i + 1, variant.label, variant.phonemes);
+                    }
+                } else {
+                    esp_mn_commands_add(i + 1, fallback_wake_word_.c_str());
+                }
+            }
         }
     }
 

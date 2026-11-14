@@ -1,6 +1,7 @@
 # Define source files
 set(SOURCES "coglet_reminder.cc"
             "coglet_rp2040_sync.cc"
+            "coglet_settings.cc"
             "audio/audio_codec.cc"
             "audio/audio_service.cc"
             "audio/codecs/no_audio_codec.cc"

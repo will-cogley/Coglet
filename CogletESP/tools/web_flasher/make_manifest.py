@@ -48,6 +48,31 @@ def read_partitions(build):
     return out
 
 
+SETTINGS_SIZE = 4096
+
+
+def settings_defaults(build):
+    """The firmware's own values, shown on the page when nothing was saved."""
+    out = {"wake_word": "hello coglet", "threshold": 5, "startup": "mecha", "reminder": "mecha",
+           "custom_wake_word": True}
+    try:
+        with open(os.path.join(build, "config", "sdkconfig.json"), encoding="utf-8") as f:
+            cfg = json.load(f)
+    except (OSError, ValueError):
+        return out
+    if cfg.get("CUSTOM_WAKE_WORD"):
+        out["wake_word"] = cfg["CUSTOM_WAKE_WORD"]
+    if cfg.get("CUSTOM_WAKE_WORD_THRESHOLD"):
+        out["threshold"] = int(cfg["CUSTOM_WAKE_WORD_THRESHOLD"])
+    for name in ("mecha", "evil", "cat"):
+        if cfg.get("COGLET_BOOT_SOUND_" + name.upper()):
+            out["startup"] = name
+        if cfg.get("COGLET_REMINDER_SOUND_" + name.upper()):
+            out["reminder"] = name
+    out["custom_wake_word"] = bool(cfg.get("USE_CUSTOM_WAKE_WORD", True))
+    return out
+
+
 def library_kb(build):
     """CONFIG_COGLET_MUSIC_LIBRARY_KB of this build (0 when the feature is off)."""
     path = os.path.join(build, "config", "sdkconfig.json")
@@ -80,11 +105,17 @@ def main(argv=None):
     os.makedirs(out_dir, exist_ok=True)
 
     songs = None
+    settings = None
     assets = read_partitions(args.build).get("assets")
     kb = library_kb(args.build)
     if assets and kb > 0:
         start = assets[0] + assets[1] - kb * 1024
         songs = {"offset": start, "size": kb * 1024}
+    if assets:
+        # main/coglet_settings.h: the sector right before the song library
+        settings = {"offset": assets[0] + assets[1] - kb * 1024 - SETTINGS_SIZE, "size": SETTINGS_SIZE,
+                    "defaults": settings_defaults(args.build)}
+    keep_out = settings["offset"] if settings else None   # nothing may be written from here on
 
     parts = []
     for offset_text, rel in sorted(flasher["flash_files"].items(), key=lambda kv: int(kv[0], 16)):
@@ -94,13 +125,13 @@ def main(argv=None):
             data = f.read()
         if offset < NVS_OFFSET + NVS_SIZE and offset + len(data) > NVS_OFFSET:
             sys.exit("refusing to publish {}: it would overwrite the NVS partition".format(rel))
-        if songs and offset < songs["offset"] + songs["size"] and offset + len(data) > songs["offset"]:
-            sys.exit("refusing to publish {}: it reaches into the song library at 0x{:x} "
+        if keep_out is not None and offset < assets[0] + assets[1] and offset + len(data) > keep_out:
+            sys.exit("refusing to publish {}: it reaches into the settings / song library area at 0x{:x} "
                      "(lower CONFIG_COGLET_MUSIC_LIBRARY_KB, or make the assets smaller)"
-                     .format(rel, songs["offset"]))
+                     .format(rel, keep_out))
         if assets and offset == assets[0]:
-            free = (songs["offset"] if songs else assets[0] + assets[1]) - offset - len(data)
-            print("  assets image: {} KB, {} KB to spare before the song library".format(
+            free = keep_out - offset - len(data)
+            print("  assets image: {} KB, {} KB to spare before the settings and song library".format(
                 len(data) // 1024, free // 1024))
         name = os.path.basename(rel)
         shutil.copyfile(src, os.path.join(out_dir, name))
@@ -124,6 +155,9 @@ def main(argv=None):
         "flash_size": settings.get("flash_size", "keep"),
         "parts": parts,
     }
+    if settings:
+        manifest["settings"] = settings
+        print("settings: 0x{:x}, defaults {}".format(settings["offset"], settings["defaults"]))
     if songs:
         manifest["songs"] = songs
         print("song library: 0x{:x}, {} KB".format(songs["offset"], songs["size"] // 1024))
