@@ -54,7 +54,7 @@ SETTINGS_SIZE = 4096
 def settings_defaults(build):
     """The firmware's own values, shown on the page when nothing was saved."""
     out = {"wake_word": "hello coglet", "threshold": 5, "startup": "mecha", "reminder": "mecha",
-           "custom_wake_word": True}
+           "custom_wake_word": True, "aec": "off", "aec_available": False}
     try:
         with open(os.path.join(build, "config", "sdkconfig.json"), encoding="utf-8") as f:
             cfg = json.load(f)
@@ -64,12 +64,15 @@ def settings_defaults(build):
         out["wake_word"] = cfg["CUSTOM_WAKE_WORD"]
     if cfg.get("CUSTOM_WAKE_WORD_THRESHOLD"):
         out["threshold"] = int(cfg["CUSTOM_WAKE_WORD_THRESHOLD"])
-    for name in ("mecha", "evil", "cat"):
+    for name in ("mecha", "evil", "cat", "christmas", "elf", "snowman"):
         if cfg.get("COGLET_BOOT_SOUND_" + name.upper()):
             out["startup"] = name
         if cfg.get("COGLET_REMINDER_SOUND_" + name.upper()):
             out["reminder"] = name
     out["custom_wake_word"] = bool(cfg.get("USE_CUSTOM_WAKE_WORD", True))
+    # device-side AEC ("Talk over Coglet"): built in, and on or off by default
+    out["aec_available"] = bool(cfg.get("USE_DEVICE_AEC"))
+    out["aec"] = "on" if out["aec_available"] and not cfg.get("COGLET_AEC_DEFAULT_OFF") else "off"
     return out
 
 
@@ -94,6 +97,8 @@ def main(argv=None):
     ap.add_argument("--commit", default="")
     ap.add_argument("--repo", default="", help="owner/name on GitHub, for the release notes link")
     ap.add_argument("--release-dir", help="also write a zip of the parts here")
+    ap.add_argument("--edition", default="standard", choices=("standard", "christmas", "elf", "snowman"),
+                    help="firmware edition: standard -> <site>/firmware/, others -> <site>/firmware-<edition>/")
     args = ap.parse_args(argv)
 
     with open(os.path.join(args.build, "flasher_args.json"), encoding="utf-8") as f:
@@ -101,7 +106,8 @@ def main(argv=None):
 
     chip = flasher.get("extra_esptool_args", {}).get("chip", "esp32s3")
     settings = flasher.get("flash_settings", {})
-    out_dir = os.path.join(args.site, "firmware")
+    folder = "firmware" if args.edition == "standard" else "firmware-" + args.edition
+    out_dir = os.path.join(args.site, folder)
     os.makedirs(out_dir, exist_ok=True)
 
     songs = None
@@ -148,6 +154,8 @@ def main(argv=None):
         "version": args.version,
         "commit": args.commit,
         "repo": args.repo,
+        "edition": args.edition,
+        "folder": folder,
         "built": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "chip": chip,
         "flash_mode": settings.get("flash_mode", "keep"),
@@ -167,7 +175,8 @@ def main(argv=None):
 
     if args.release_dir:
         os.makedirs(args.release_dir, exist_ok=True)
-        zpath = os.path.join(args.release_dir, "coglet-firmware-{}.zip".format(args.version))
+        suffix = "" if args.edition == "standard" else "-" + args.edition
+        zpath = os.path.join(args.release_dir, "coglet-firmware-{}{}.zip".format(args.version, suffix))
         with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
             for p in parts:
                 z.write(os.path.join(out_dir, p["path"]), p["path"])

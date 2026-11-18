@@ -28,6 +28,58 @@ There are two kinds of songs:
 The eyes dance too: both eyes looking left/right together on the beat, and
 crossed / split eyes on accents.
 
+### Christmas edition
+
+menuconfig **NMRobotics Coglet Dance → Firmware edition → Christmas** (or the
+*Christmas* choice on the web flasher) swaps the three tracks for public-domain
+carols in our own arrangements:
+
+| style | Carol | Tempo | Length | Dance |
+|---|---|---|---|---|
+| `lyrical` | Silent Night (1818): piano, strings, celesta | 104 BPM, 3/4 | 31.5 s | eyes closed throughout, as if dreaming along: a waltz sway with base and neck, a soft nod on each downbeat, ears and a quiet hum on the long notes; the face lifts towards "All is calm" and "Sleep in heavenly peace" and ends curled up asleep |
+| `classic` | Jingle Bells (1857): sleigh bells, stride piano, bass, glockenspiel | 136 BPM | 32 s | bells shake the ears, a mouthed "ho ho ho", ears ring on "jingle bells", base swings on "jingle all the way", sleigh rocking, a freeze on "hey!"; the second chorus is bigger |
+| `grand` | Joy to the World (1839): organ, brass, choir, timpani | 84 BPM, 2/4 | 32.5 s | big moves on most beats: rises from a bow with the timpani, ears snap up with the brass, the head walks down the descending scale while the base sweeps across the room and climbs back up; the running bars swing and lean on every beat, repeated notes ring the ears, the cymbal throws the head up singing, a proud final chord, then a bow |
+
+The choreography moves on the moments that matter (phrase starts, melodic
+peaks, cymbals and bells) and flows or holds still in between; only `grand`
+follows most beats. Each dance reaches its final pose 1.5 s before the music
+ends, so the RP2040 hands back exactly when the music stops and Coglet settles
+into its normal pose before the follow-up session, like the standard dances. The Christmas startup and reminder sounds are the
+defaults in this edition and can be chosen in any edition (web flasher
+Settings).
+
+### Elf edition
+
+**Firmware edition → Elf**: a quick, cheeky toy-workshop elf, with
+traditional carols in our own arrangements:
+
+| style | Carol | Tempo | Length | Dance |
+|---|---|---|---|---|
+| `workshop` | Deck the Halls: xylophone, pizzicato, woodblock, toy hammers, clarinet | 132 BPM | 32.5 s | winds up with the key and pops up with the spring; hammering nods on 1 and 3, ears answer the toy hammers on every "fa la la"; looks around the workshop in the middle and climbs with the rising run; a proud pose and a wink at the end |
+| `mischief` | God Rest Ye Merry Gentlemen (E minor): pizzicato, bassoon, then clarinet, accordion, tambourine | 156 BPM | 32 s | sneaking: low head, squinting, ears back, eyes darting, the base creeping; freezes on the long notes and checks left and right; then bold: eyes open, head up, big sways and nods; a sly "ta-da" and a wink |
+| `party` | We Wish You a Merry Christmas: fiddle, accordion, tuba, tambourine | 160 BPM, 3/4 | 31 s | a waltz sway, mouthing "Christmas", three nods on "good tidings we", ears ringing in the chorus; the key change throws the ears up and everything gets bigger |
+
+The Elf startup (wind-up toy) and reminder (toy clock) sounds are the
+defaults in this edition. The choreography is in `RP2040/dance_elf.py`,
+loaded only when an Elf dance runs.
+
+### Snowman edition
+
+**Firmware edition → Snowman**: a soft, slow, slightly clumsy snowman, with
+public-domain music in our own arrangements:
+
+| style | Music | Tempo | Length | Dance |
+|---|---|---|---|---|
+| `lullaby` | Brahms, Wiegenlied Op. 49/4 (1868): music box, celesta, soft strings, wind chimes | 104 BPM, 3/4 | 32.5 s | eyes open at first, getting sleepier every line (lids lower, head sinks, the rocking slows); startled awake once, a big yawn on the rising notes, asleep by the last chord |
+| `stomp` | Good King Wenceslas (tune 1582): tuba, bassoon, pizzicato, snow crunch | 108 BPM | 32.5 s | a heavy waddle (the neck rocks on 1 and 3, the head sinks with each step); two snowballs hit in the gaps: recoil, blink, shake it off; a third one at the end gets a wink |
+| `blizzard` | Leontovych, Shchedryk (1914; Carol of the Bells): glass bells, swirling strings, wind | 150 BPM, 3/4 | 32 s | the eyes follow the bells, the base drifts down with the bass, ears flutter, the head is swept in growing circles to the climax, calms down, and freezes solid in one snap at the crack of ice |
+
+Only Leontovych's own 1914 material (the four-note bell ostinato and its
+sequence) is used for `blizzard`, not the later English lyrics or choral
+arrangement. The Snowman startup (ice chimes) and reminder (icicles) sounds
+are the defaults in this edition; the choreography is in
+`RP2040/dance_snow.py`.
+
 ## Your own songs
 
 There are two ways:
@@ -144,7 +196,13 @@ MCP self.coglet.dance(style)
   No torque release while dancing; afterwards the default motion limits are
   restored, released servos are driven again, and the current state is
   re-applied (idle releases torque as usual).
-* Built-in tracks follow `dance_data.py` (generated; do not edit by hand).
+* Built-in tracks follow `dance_data.py` (standard), `dance_xmas.py`
+  (Christmas), `dance_elf.py` (Elf) and `dance_snow.py` (Snowman), all
+  generated; do not edit by hand.
+  Each is imported on the first dance that needs it, so a Coglet only holds
+  its own edition's moves in RAM. The holiday editions' dances mostly use two
+  generic moves: `("to", (servo, angle[,
+  speed]))` and `("pulse", (servo, angle, hold_ms))`.
   Sync: `AUDIO_LATENCY_MS = 120` (command to sound) and `SERVO_LEAD_MS = 100`
   (moves start early so they arrive on the beat).
 * Custom songs: `start_groove()`, `groove_beat()`, `groove_end()`. If the ESP
@@ -167,3 +225,27 @@ Then turn `out/<name>.ogg` into `main/coglet_sounds/coglet_dance_<name>.h`
 edit `choreo.py`, run `python3 choreo_only.py`, then `export_rp2040.py`.
 `tracks.py` also holds `sad`, a solo piano piece (68 BPM, F minor) that is
 still in progress and not part of the firmware.
+
+Christmas edition (`xmas.py`, scores shared with `choreo_xmas.py`):
+
+```bash
+python3 xmas.py lyrical classic grand startup reminder   # out/xmas_*.ogg + previews
+python3 choreo_xmas.py                                    # out/xmas_*_choreo.json
+python3 export_xmas_rp2040.py ../../RP2040/dance_xmas.py
+python3 export_xmas_headers.py ../../main/coglet_sounds   # from out/approved/*.ogg
+```
+
+Elf edition (`elf.py`, scores shared with `choreo_elf.py`), the same way:
+
+```bash
+python3 elf.py workshop mischief party startup reminder   # out/elf_*.ogg + previews
+python3 choreo_elf.py                                      # out/elf_*_choreo.json
+python3 export_elf_rp2040.py ../../RP2040/dance_elf.py
+python3 export_elf_headers.py ../../main/coglet_sounds     # from out/approved/*.ogg
+```
+
+Snowman edition: `snow.py`, `choreo_snow.py`, `export_snow_rp2040.py
+../../RP2040/dance_snow.py` and `export_snow_headers.py ../../main/coglet_sounds`.
+
+The header exporters read `out/approved/`, so only listened-to audio goes
+into the firmware: copy a new render there once it's approved.

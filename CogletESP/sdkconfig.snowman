@@ -1,0 +1,9 @@
+# Snowman edition overlay. The Firmware workflow builds it next to the
+# other editions:
+#   idf.py -B build-snowman -D SDKCONFIG=build-snowman/sdkconfig \
+#          -D SDKCONFIG_DEFAULTS="sdkconfig;sdkconfig.snowman" build
+# Locally you can also just pick it in menuconfig:
+#   NMRobotics Coglet Dance -> Firmware edition -> Snowman
+CONFIG_COGLET_EDITION_SNOWMAN=y
+CONFIG_COGLET_BOOT_SOUND_SNOWMAN=y
+CONFIG_COGLET_REMINDER_SOUND_SNOWMAN=y

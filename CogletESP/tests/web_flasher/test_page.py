@@ -15,6 +15,7 @@ import http.server
 import io
 import json
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -63,21 +64,69 @@ def build_site():
                                "0xd000": "ota_data_initial.bin", "0x20000": "xiaozhi.bin",
                                "0x800000": "generated_assets.bin"},
                "extra_esptool_args": {"chip": "esp32s3"}}, open(os.path.join(build, "flasher_args.json"), "w"))
-    json.dump({"COGLET_DANCE": True, "COGLET_MUSIC": True, "COGLET_MUSIC_LIBRARY_KB": SONG_AREA_KB},
+    json.dump({"COGLET_DANCE": True, "COGLET_MUSIC": True, "COGLET_MUSIC_LIBRARY_KB": SONG_AREA_KB,
+               "USE_CUSTOM_WAKE_WORD": True, "CUSTOM_WAKE_WORD": "hello coglet", "CUSTOM_WAKE_WORD_THRESHOLD": 5,
+               "COGLET_BOOT_SOUND_EVIL": True, "COGLET_REMINDER_SOUND_CAT": True,
+               "USE_DEVICE_AEC": True, "COGLET_AEC_DEFAULT_OFF": True},
               open(os.path.join(build, "config", "sdkconfig.json"), "w"))
     subprocess.run([sys.executable, os.path.join(ROOT, "tools/web_flasher/make_manifest.py"), "--build", build,
                     "--site", site, "--version", "v9.9.9", "--commit", "abc1234", "--repo", "example/Coglet"],
                    check=True, stdout=subprocess.DEVNULL)
+    # Christmas edition: same layout, other app image and defaults
+    xbuild = os.path.join(WORK, "build-christmas")
+    shutil.rmtree(xbuild, ignore_errors=True)
+    shutil.copytree(build, xbuild)
+    with open(os.path.join(xbuild, "xiaozhi.bin"), "wb") as f:
+        f.write(os.urandom(320000))
+    json.dump({"COGLET_DANCE": True, "COGLET_MUSIC": True, "COGLET_MUSIC_LIBRARY_KB": SONG_AREA_KB,
+               "USE_CUSTOM_WAKE_WORD": True, "CUSTOM_WAKE_WORD": "hello coglet", "CUSTOM_WAKE_WORD_THRESHOLD": 5,
+               "COGLET_EDITION_CHRISTMAS": True, "COGLET_BOOT_SOUND_CHRISTMAS": True,
+               "COGLET_REMINDER_SOUND_CHRISTMAS": True, "USE_DEVICE_AEC": True, "COGLET_AEC_DEFAULT_OFF": True},
+              open(os.path.join(xbuild, "config", "sdkconfig.json"), "w"))
+    subprocess.run([sys.executable, os.path.join(ROOT, "tools/web_flasher/make_manifest.py"), "--build", xbuild,
+                    "--site", site, "--version", "v9.9.9", "--commit", "abc1234", "--repo", "example/Coglet",
+                    "--edition", "christmas"], check=True, stdout=subprocess.DEVNULL)
+    # Elf edition: the same again
+    ebuild = os.path.join(WORK, "build-elf")
+    shutil.rmtree(ebuild, ignore_errors=True)
+    shutil.copytree(build, ebuild)
+    with open(os.path.join(ebuild, "xiaozhi.bin"), "wb") as f:
+        f.write(os.urandom(310000))
+    json.dump({"COGLET_DANCE": True, "COGLET_MUSIC": True, "COGLET_MUSIC_LIBRARY_KB": SONG_AREA_KB,
+               "USE_CUSTOM_WAKE_WORD": True, "CUSTOM_WAKE_WORD": "hello coglet", "CUSTOM_WAKE_WORD_THRESHOLD": 5,
+               "COGLET_EDITION_ELF": True, "COGLET_BOOT_SOUND_ELF": True,
+               "COGLET_REMINDER_SOUND_ELF": True, "USE_DEVICE_AEC": True, "COGLET_AEC_DEFAULT_OFF": True},
+              open(os.path.join(ebuild, "config", "sdkconfig.json"), "w"))
+    subprocess.run([sys.executable, os.path.join(ROOT, "tools/web_flasher/make_manifest.py"), "--build", ebuild,
+                    "--site", site, "--version", "v9.9.9", "--commit", "abc1234", "--repo", "example/Coglet",
+                    "--edition", "elf"], check=True, stdout=subprocess.DEVNULL)
+    # Snowman edition: the same again
+    sbuild = os.path.join(WORK, "build-snowman")
+    shutil.rmtree(sbuild, ignore_errors=True)
+    shutil.copytree(build, sbuild)
+    with open(os.path.join(sbuild, "xiaozhi.bin"), "wb") as f:
+        f.write(os.urandom(315000))
+    json.dump({"COGLET_DANCE": True, "COGLET_MUSIC": True, "COGLET_MUSIC_LIBRARY_KB": SONG_AREA_KB,
+               "USE_CUSTOM_WAKE_WORD": True, "CUSTOM_WAKE_WORD": "hello coglet", "CUSTOM_WAKE_WORD_THRESHOLD": 5,
+               "COGLET_EDITION_SNOWMAN": True, "COGLET_BOOT_SOUND_SNOWMAN": True,
+               "COGLET_REMINDER_SOUND_SNOWMAN": True, "USE_DEVICE_AEC": True, "COGLET_AEC_DEFAULT_OFF": True},
+              open(os.path.join(sbuild, "config", "sdkconfig.json"), "w"))
+    subprocess.run([sys.executable, os.path.join(ROOT, "tools/web_flasher/make_manifest.py"), "--build", sbuild,
+                    "--site", site, "--version", "v9.9.9", "--commit", "abc1234", "--repo", "example/Coglet",
+                    "--edition", "snowman"], check=True, stdout=subprocess.DEVNULL)
     subprocess.run([sys.executable, os.path.join(ROOT, "tools/rp2040_bundle/build_bundle.py"), "--src",
                     os.path.join(ROOT, "RP2040"), "--site", os.path.join(site, "rp2040")],
                    check=True, stdout=subprocess.DEVNULL)
-    for name in ("index.html", "coglet_songs.js"):
+    for name in ("index.html", "coglet_songs.js", "coglet_i18n.js"):
         shutil.copy(os.path.join(ROOT, "tools/web_flasher", name), site)
     return site
 
 
 SITE = build_site()
 MANIFEST = json.load(open(os.path.join(SITE, "firmware/manifest.json")))
+XMANIFEST = json.load(open(os.path.join(SITE, "firmware-christmas/manifest.json")))
+EMANIFEST = json.load(open(os.path.join(SITE, "firmware-elf/manifest.json")))
+SMANIFEST = json.load(open(os.path.join(SITE, "firmware-snowman/manifest.json")))
 AREA = MANIFEST["songs"]
 
 
@@ -234,8 +283,9 @@ def song_files(names):
     return out
 
 
-def new_page(browser, scheme="light", width=1100):
-    ctx = browser.new_context(viewport={"width": width, "height": 1300}, color_scheme=scheme)
+def new_page(browser, scheme="light", width=1100, locale=None):
+    opts = {"locale": locale} if locale else {}
+    ctx = browser.new_context(viewport={"width": width, "height": 1300}, color_scheme=scheme, **opts)
     page = ctx.new_page()
     page.errors = []
     page.on("pageerror", lambda e: page.errors.append(str(e)))
@@ -284,7 +334,9 @@ with sync_playwright() as p:
             check(page.evaluate("document.activeElement.className") == "skip", "first Tab reaches the skip link")
             page.keyboard.press("Enter")
             page.keyboard.press("Tab")
-            check(page.evaluate("document.activeElement.id") == "flash", "skip link leads to Connect & Update")
+            check(page.evaluate("document.activeElement.closest('#update') !== null"),
+                  "skip link leads into the update card (edition choice, then Connect & Update)",
+                  page.evaluate("document.activeElement.outerHTML.slice(0, 60)"))
             check(page.evaluate("getComputedStyle(document.activeElement).outlineStyle") != "none",
                   "keyboard focus is visible")
             link = page.evaluate("document.querySelector('#version a') && document.querySelector('#version a').href")
@@ -297,8 +349,199 @@ with sync_playwright() as p:
     page.goto("http://127.0.0.1:%d/" % PORT)
     page.wait_for_timeout(500)
     check(page.evaluate("document.documentElement.scrollWidth") <= 390, "no sideways scrolling on a phone")
+    page.goto("http://127.0.0.1:%d/?season=christmas" % PORT)
+    page.wait_for_timeout(300)
+    check(page.evaluate("document.documentElement.scrollWidth") <= 390, "no sideways scrolling on a phone (Christmas)")
+    page.screenshot(path=os.path.join(WORK, "page_phone_christmas.png"))
     check(not page.evaluate("document.getElementById('unsupported').hidden"), "phone/no Web Serial: warning shown")
     page.screenshot(path=os.path.join(WORK, "page_phone.png"), full_page=True)
+    ctx.close()
+
+    # ------------------------------------------------------------ Christmas look
+    print("season")
+    contrast_js = """() => {
+      const rgb = (c) => c.match(/[\\d.]+/g).slice(0, 3).map(Number);
+      const lum = (c) => { const v = rgb(c).map((x) => { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); });
+                           return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; };
+      const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+      const b = getComputedStyle(document.getElementById('flash'));
+      const card = getComputedStyle(document.querySelector('.card'));
+      const body = getComputedStyle(document.body);
+      return { button: ratio(b.color, b.backgroundColor), text: ratio(body.color, card.backgroundColor),
+               muted: ratio(getComputedStyle(document.querySelector('.sub')).color, body.backgroundColor) };
+    }"""
+    for when, expect in (("2026-12-20T10:00:00", True), ("2027-01-06T20:00:00", True),
+                         ("2027-01-07T09:00:00", False), ("2026-11-30T23:00:00", False)):
+        ctx, page = new_page(browser, "light")
+        page.clock.set_fixed_time(when)
+        page.goto("http://127.0.0.1:%d/" % PORT)
+        on = page.evaluate("document.documentElement.getAttribute('data-season') === 'christmas'")
+        shown = page.is_visible("#seasontoggle")
+        check(on == expect and shown == expect, "Christmas look %s on %s" % ("on" if expect else "off", when[:10]))
+        ctx.close()
+    for scheme in ("light", "dark"):
+        ctx, page = new_page(browser, scheme)
+        page.clock.set_fixed_time("2026-12-20T10:00:00")
+        page.expose_function("__toBoard", lambda arr: [])
+        page.goto("http://127.0.0.1:%d/" % PORT)
+        page.wait_for_function("document.getElementById('version').textContent.includes('Version')")
+        page.screenshot(path=os.path.join(WORK, "page_christmas_%s.png" % scheme), full_page=True)
+        deco = page.evaluate("""() => {
+            const shown = (sel) => { const e = document.querySelector(sel); return e && e.getBoundingClientRect().width > 0; };
+            return { garland: getComputedStyle(document.querySelector('.garland.left')).backgroundImage.includes('svg'),
+              lights: document.querySelectorAll('#lights i').length,
+              anim: getComputedStyle(document.querySelector('#lights i')).animationName,
+              baubles: document.querySelectorAll('#baubles span').length,
+              fall: document.querySelectorAll('#fall .p').length,
+              star: shown('#fall .star'), flake: shown('#fall .flake'), bow: shown('.bow.l') }; }""")
+        check(deco["garland"] and deco["lights"] > 50 and deco["anim"] == "glow" and deco["baubles"] > 10 and deco["bow"],
+              "garland, bows, baubles and twinkling lights (%s)" % scheme, str(deco))
+        check(deco["fall"] > 10 and deco["star"] == (scheme == "light") and deco["flake"] == (scheme == "dark"),
+              "falling stars in light, snowflakes in dark (%s)" % scheme, str(deco))
+        c = page.evaluate(contrast_js)
+        check(c["button"] >= 4.5 and c["text"] >= 7 and c["muted"] >= 4.5,
+              "Christmas colours readable (%s)" % scheme, str(c))
+        if scheme == "light":
+            page.click("#seasontoggle")
+            check(page.evaluate("document.documentElement.getAttribute('data-season')") is None
+                  and "Turn on" in page.inner_text("#seasontoggle"), "Christmas look can be turned off")
+            page.reload()
+            check(page.evaluate("document.documentElement.getAttribute('data-season')") is None,
+                  "turned off for the rest of the season")
+            page.click("#seasontoggle")
+            page.reload()
+            check(page.evaluate("document.documentElement.getAttribute('data-season')") == "christmas",
+                  "and back on")
+            page.evaluate("localStorage.setItem('coglet.season.off', '2026')")
+            page.clock.set_fixed_time("2027-12-02T10:00:00")
+            page.reload()
+            check(page.evaluate("document.documentElement.getAttribute('data-season')") == "christmas",
+                  "comes back next Christmas")
+        check(not page.errors, "no script errors (Christmas, %s)" % scheme, "; ".join(page.errors))
+        ctx.close()
+    ctx, page = new_page(browser, "light")
+    page.emulate_media(reduced_motion="reduce")
+    page.goto("http://127.0.0.1:%d/?season=christmas" % PORT)
+    check(page.evaluate("getComputedStyle(document.querySelector('#fall .p')).animationName") == "none"
+          and page.evaluate("getComputedStyle(document.querySelector('#lights i')).animationName") == "none"
+          and page.evaluate("getComputedStyle(document.querySelector('#baubles span')).animationName") == "none",
+          "nothing falls, swings or twinkles with reduced motion")
+    page.goto("http://127.0.0.1:%d/" % PORT)
+    page.clock.set_fixed_time("2026-11-20T10:00:00")
+    page.reload()
+    check(page.evaluate("getComputedStyle(document.getElementById('xmas')).display") == "none",
+          "no decorations outside the season")
+    # appearance picker: forced dark / light, and day and night by the clock
+    page.select_option("#theme", "dark")
+    dark_bg = page.evaluate("getComputedStyle(document.body).backgroundColor")
+    page.reload()
+    check(page.evaluate("document.documentElement.dataset.theme") == "dark" and page.input_value("#theme") == "dark"
+          and dark_bg == "rgb(20, 20, 22)", "Appearance: Dark is applied and remembered", dark_bg)
+    page.select_option("#theme", "daynight")
+    check(page.evaluate("document.documentElement.dataset.theme") == "light", "Day and night: light at 10:00")
+    page.clock.set_fixed_time("2026-11-20T21:30:00")
+    page.reload()
+    check(page.evaluate("document.documentElement.dataset.theme") == "dark", "Day and night: dark at 21:30")
+    page.select_option("#theme", "system")
+    check(page.evaluate("document.documentElement.dataset.theme") is None, "back to the browser's setting")
+    ctx.close()
+    ctx, page = new_page(browser, "light")
+    ctx.close()
+
+    # ------------------------------------------------------------ languages
+    print("languages")
+    dicts = json.loads(subprocess.check_output(["node", "-e", """
+        global.window = {}; global.location = { search: "" }; global.navigator = { languages: ["en"] };
+        global.localStorage = { getItem() { return null; }, setItem() {} };
+        global.document = { documentElement: { setAttribute() {} } };
+        require(process.argv[1]); console.log(JSON.stringify(window.CogletI18n.dict));
+    """, os.path.join(SITE, "coglet_i18n.js")]).decode())
+    ctx, page = new_page(browser, "light")
+    page.goto("http://127.0.0.1:%d/?lang=en" % PORT)
+    page.wait_for_function("document.getElementById('version').textContent.includes('Version')")
+    source = page.evaluate("""() => {
+        const out = {};
+        for (const el of document.querySelectorAll('[data-i18n]')) out[el.dataset.i18n] = el.innerHTML;
+        for (const el of document.querySelectorAll('[data-i18n-aria]')) out[el.dataset.i18nAria] = el.getAttribute('aria-label');
+        return out; }""")
+    ctx.close()
+    ph = lambda v: sorted(set(re.findall(r"\{(\w+)\}", v)))
+    tags = lambda v: re.findall(r"<(/?\w+)(?:\s+class=\"([^\"]*)\")?", v)
+    for lang in ("de", "es", "ja"):
+        d = dicts[lang]
+        missing = [k for k in list(source) + list(dicts["en"]) if k not in d]
+        check(not missing, "%s: every text is translated" % lang, ", ".join(missing[:20]))
+        extra = [k for k in d if k not in source and k not in dicts["en"]]
+        check(not extra, "%s: no unknown keys" % lang, ", ".join(extra))
+        bad = []
+        for k, en in list(dicts["en"].items()) + list(source.items()):
+            v = d.get(k)
+            if v is None:
+                continue
+            ens = en if isinstance(en, dict) else {"other": en}
+            vs = v if isinstance(v, dict) else {"other": v}
+            if isinstance(en, dict) and lang in ("de", "es") and set(vs) != {"one", "other"}:
+                bad.append(k + " (plural forms)")
+            for form, text in vs.items():
+                if ph(text) != ph(ens["other"]):
+                    bad.append(k + " {placeholders}")
+                if k in source and k != "faq.a6" and tags(text) != tags(en):
+                    bad.append(k + " <tags>")
+        check(not bad, "%s: placeholders and markup match English" % lang, ", ".join(bad))
+
+    for lang, locale, word in (("de", "de-DE", "Coglet aktualisieren"), ("es", "es-419", "Actualizar Coglet"),
+                               ("ja", "ja-JP", "Cogletをアップデート")):
+        # picked from the browser's language
+        ctx, page = new_page(browser, "light", locale=locale)
+        page.goto("http://127.0.0.1:%d/" % PORT)
+        page.wait_for_function("document.getElementById('version').textContent.length > 20")
+        check(page.evaluate("document.documentElement.lang") == lang and page.inner_text("#update-h") == word
+              and page.input_value("#lang") == lang, "%s chosen from the browser language" % lang)
+        page.wait_for_timeout(300)
+        page.screenshot(path=os.path.join(WORK, "page_%s.png" % lang), full_page=True)
+        info = page.evaluate("""() => {
+            const over = [];
+            for (const el of document.querySelectorAll('button, label, summary, legend, h2, .status, select, option'))
+              if (el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflow !== 'visible') over.push(el.id || el.textContent.slice(0, 30));
+            const svg = [...document.querySelectorAll('text[data-fit]')].map((e) => e.getComputedTextLength() <= +e.dataset.fit + 0.5);
+            return { wide: document.documentElement.scrollWidth, over, svg,
+                     version: document.getElementById('version').textContent,
+                     thr: document.getElementById('thr-value').textContent };
+        }""")
+        check(info["wide"] <= 1100 and not info["over"] and all(info["svg"]),
+              "%s: nothing overflows (desktop)" % lang, str(info))
+        check(not re.search(r"\bVersion\b.*\bBuilt\b", info["version"]) or lang == "de",
+              "%s: firmware card translated" % lang, info["version"])
+        # a message written by the scripts
+        page.check('input[name="edition"][value="christmas"]')
+        st = page.inner_text("#status")
+        check(st and "edition selected" not in st, "%s: status messages translated" % lang, st)
+        page.check('input[name="edition"][value="standard"]')
+        check(not page.errors, "no script errors (%s)" % lang, "; ".join(page.errors))
+        ctx.close()
+        # phone width
+        ctx, page = new_page(browser, "dark", width=390)
+        page.goto("http://127.0.0.1:%d/?lang=%s&season=christmas" % (PORT, lang))
+        page.wait_for_timeout(500)
+        check(page.evaluate("document.documentElement.scrollWidth") <= 390, "%s: no sideways scrolling on a phone" % lang)
+        page.screenshot(path=os.path.join(WORK, "phone_%s.png" % lang))
+        ctx.close()
+
+    # switching at runtime, remembered, and back to English
+    ctx, page = new_page(browser, "light", locale="en-US")
+    page.goto("http://127.0.0.1:%d/" % PORT)
+    page.wait_for_function("document.getElementById('version').textContent.includes('Version')")
+    page.select_option("#lang", "de")
+    check(page.inner_text("#update-h") == "Coglet aktualisieren" and "Erstellt" in page.inner_text("#version")
+          and page.inner_text("#monitor") == "Geräteprotokoll anzeigen", "switching to German redraws the page")
+    page.reload()
+    page.wait_for_function("document.getElementById('version').textContent.length > 20")
+    check(page.input_value("#lang") == "de" and page.evaluate("document.documentElement.lang") == "de",
+          "the language is remembered")
+    page.select_option("#lang", "en")
+    check(page.inner_text("#update-h") == "Update Coglet" and "Built" in page.inner_text("#version")
+          and "Connect & Update" in page.inner_text("#update"), "and back to English")
+    check(not page.errors, "no script errors (switching)", "; ".join(page.errors))
     ctx.close()
 
     # ------------------------------------------------------------ update -> servo board needed
@@ -347,6 +590,55 @@ with sync_playwright() as p:
     check("All set" in st and len(page.evaluate("window.__requests")) == n_req,
           "Check Coglet confirms the servo board, without asking for the port again")
     check("attention" not in page.get_attribute("#rpcard", "class"), "highlight removed once all set")
+
+    # ------------------------------------------------------------ editions
+    print("editions")
+    check(page.is_visible("#editions") and page.is_checked('input[name="edition"][value="standard"]'),
+          "edition picker shown, standard selected by default")
+    check(XMANIFEST["settings"]["defaults"]["startup"] == "christmas" and XMANIFEST["edition"] == "christmas",
+          "Christmas manifest: edition and Christmas sound defaults")
+    page.check('input[name="edition"][value="christmas"]')
+    check("Christmas edition" in page.inner_text("#version"), "version line shows the Christmas edition")
+    page.evaluate("window.__bootLines = ['I (900) CogletRp2040: RP2040 up to date (bundle x, 0 s)']")
+    page.click("#flash")
+    wait_status(page, "status", ("ok",), contains="All set", timeout=60000)
+    fl = page.evaluate("window.__flash")
+    got = [(f["address"], f["len"], f["md5"]) for f in fl["files"]]
+    check(got == [(x["offset"], x["size"], x["md5"]) for x in XMANIFEST["parts"]],
+          "Christmas edition parts written (not the standard ones)")
+    check(page.evaluate("localStorage.getItem('coglet.edition')") == "christmas", "edition choice remembered")
+    # Elf edition
+    check(page.is_visible("#edition-elf") and EMANIFEST["settings"]["defaults"]["startup"] == "elf"
+          and EMANIFEST["edition"] == "elf", "Elf edition offered, with Elf sound defaults")
+    page.check('input[name="edition"][value="elf"]')
+    check("Elf edition" in page.inner_text("#version") and "Elf edition selected" in page.inner_text("#status"),
+          "version line and status show the Elf edition")
+    page.click("#flash")
+    wait_status(page, "status", ("ok",), contains="All set", timeout=60000)
+    fl = page.evaluate("window.__flash")
+    got = [(f["address"], f["len"], f["md5"]) for f in fl["files"]]
+    check(got == [(x["offset"], x["size"], x["md5"]) for x in EMANIFEST["parts"]],
+          "Elf edition parts written")
+    check(page.evaluate("localStorage.getItem('coglet.edition')") == "elf", "Elf choice remembered")
+    page.click("#setdefaults")
+    check("Elf edition" in page.inner_text("#setstatus") and page.input_value("#boot") == "elf"
+          and page.input_value("#rem") == "elf", "Elf defaults in Settings")
+    # Snowman edition
+    check(page.is_visible("#edition-snowman") and SMANIFEST["settings"]["defaults"]["reminder"] == "snowman",
+          "Snowman edition offered, with Snowman sound defaults")
+    page.check('input[name="edition"][value="snowman"]')
+    check("Snowman edition" in page.inner_text("#version"), "version line shows the Snowman edition")
+    page.click("#flash")
+    wait_status(page, "status", ("ok",), contains="All set", timeout=60000)
+    fl = page.evaluate("window.__flash")
+    got = [(f["address"], f["len"], f["md5"]) for f in fl["files"]]
+    check(got == [(x["offset"], x["size"], x["md5"]) for x in SMANIFEST["parts"]], "Snowman edition parts written")
+    page.click("#setdefaults")
+    check(page.input_value("#boot") == "snowman" and page.input_value("#rem") == "snowman", "Snowman defaults in Settings")
+    page.check('input[name="edition"][value="standard"]')
+    check("Christmas" not in page.inner_text("#version") and "Elf" not in page.inner_text("#version"),
+          "switching back shows the standard edition")
+    page.click("#setdefaults")
 
     # ------------------------------------------------------------ songs
     print("songs")
@@ -411,6 +703,115 @@ with sync_playwright() as p:
     writes = page.evaluate("window.__writes").pop()
     lib = area_image(page)
     check(len(writes) == 1 and lib["ok"] and not lib["songs"], "removing songs rewrites only the song list")
+
+    # ---------------------------------------------------------- settings
+    print("settings")
+    SET = MANIFEST["settings"]
+    check(SET["offset"] == AREA["offset"] - 4096 and SET["defaults"]["reminder"] == "cat" and SET["defaults"]["startup"] == "evil",
+          "settings sector sits right before the song library; defaults from the build")
+    check(page.input_value("#ww") == "hello coglet" and page.input_value("#thr") == "5" and page.input_value("#rem") == "cat"
+          and page.input_value("#boot") == "evil",
+          "defaults shown before reading")
+    page.click("#setread")
+    st = wait_status(page, "setstatus", ("ok", "err", "warn"))
+    check("default settings" in st, "blank settings read as defaults", st)
+    page.fill("#ww", "  Hey, Robot! ")
+    page.dispatch_event("#ww", "change")
+    check(page.input_value("#ww") == "hey robot", "wake word cleaned up", page.input_value("#ww"))
+    page.fill("#thr", "3")
+    page.dispatch_event("#thr", "input")
+    check("very easy" in page.inner_text("#thr-value"), "sensitivity explained in words", page.inner_text("#thr-value"))
+    page.select_option("#rem", "evil")
+    page.select_option("#boot", "christmas")
+    page.evaluate("window.__bootLines = ['I (900) CogletSettings: settings: wake word \"hey robot\", threshold 3, reminder evil']")
+    n_writes = len(page.evaluate("window.__writes"))
+    page.click("#setsave")
+    st = wait_status(page, "setstatus", ("ok", "warn", "err"), contains="Say")
+    all_writes = page.evaluate("window.__writes")
+    w = all_writes[-1]
+    check(len(all_writes) == n_writes + 1 and len(w) == 1 and w[0]["address"] == SET["offset"] and w[0]["len"] == 4096,
+          "one 4 KB write at the settings sector")
+    got = page.evaluate("""async (o) => { const m = await import('/coglet_songs.js');
+        return m.parseSettings(window.__mem.slice(o, o + 4096)); }""", SET["offset"])
+    check(got == {"wake_word": "hey robot", "threshold": 3, "startup": "christmas", "reminder": "evil"}, "saved settings read back", str(got))
+    check('Say "hey robot"' in st, "page confirms once Coglet loaded them", st)
+    # a wake word the model can't use: the page says Coglet kept its usual one
+    page.fill("#ww", "zzxq qzzx")
+    page.evaluate("(l) => { window.__bootLines = l; }", [
+        'I (900) CogletSettings: settings: wake word "zzxq qzzx", threshold 3, startup cat, reminder evil',
+        'E (2100) CustomWakeWord: Wake word "zzxq qzzx" from settings can\'t be used (err=258), using "hello coglet"'])
+    page.click("#setsave")
+    st = wait_status(page, "setstatus", ("warn",), contains="couldn't use")
+    check('still answers to "hello coglet"' in st, "unusable wake word reported, with the fallback", st)
+    page.fill("#ww", "hey robot")
+    page.evaluate("(l) => { window.__bootLines = l; }", [
+        'I (900) CogletSettings: settings: wake word "hey robot", threshold 3, startup cat, reminder evil'])
+    page.click("#setsave")
+    wait_status(page, "setstatus", ("ok",), contains="Say")
+
+    page.click("#setread")
+    wait_status(page, "setstatus", ("ok",), contains="current settings")
+    check(page.input_value("#ww") == "hey robot" and page.input_value("#rem") == "evil" and page.input_value("#boot") == "christmas",
+          "settings read back into the form")
+    # values equal to the firmware defaults aren't stored, so they follow the
+    # firmware (and its edition); "Use defaults" + Save clears the settings
+    page.select_option("#rem", "cat")
+    page.click("#setsave")
+    wait_status(page, "setstatus", ("ok",), contains="Say")
+    got = page.evaluate("""async (o) => { const m = await import('/coglet_songs.js');
+        return m.parseSettings(window.__mem.slice(o, o + 4096)); }""", SET["offset"])
+    check(got == {"wake_word": "hey robot", "threshold": 3, "startup": "christmas"}, "a default value isn't stored", str(got))
+    page.click("#setdefaults")
+    check("Standard edition" in page.inner_text("#setstatus"), "defaults name the edition", page.inner_text("#setstatus"))
+    page.evaluate("(l) => { window.__bootLines = l; }", [
+        'I (900) CogletSettings: settings: wake word "(default)", threshold 5, startup (default), reminder (default)'])
+    page.click("#setsave")
+    wait_status(page, "setstatus", ("ok",), contains="Say")
+    got = page.evaluate("""async (o) => { const m = await import('/coglet_songs.js');
+        return m.parseSettings(window.__mem.slice(o, o + 4096)); }""", SET["offset"])
+    check(got == {}, "Use defaults + Save stores nothing", str(got))
+    page.click("#setread")
+    st = wait_status(page, "setstatus", ("ok",))
+    check("default settings" in st and page.input_value("#boot") == "evil", "cleared settings read as defaults", st)
+    # echo cancellation: off by default, saved as "aec=on", confirmed from the boot log
+    check(SET["defaults"]["aec_available"] and SET["defaults"]["aec"] == "off" and not page.is_checked("#aec")
+          and "Takes a moment" in page.inner_text("#aec-note"), "Talk over Coglet: off by default, with a time note")
+    page.check("#aec")
+    page.evaluate("(l) => { window.__bootLines = l; }", [
+        'I (900) CogletSettings: settings: wake word "(default)", threshold 0, startup (default), reminder (default), aec on',
+        'I (905) CogletSettings: Device AEC: on (from settings)',
+        'I (2100) CustomWakeWord: Hello Coglet variant: hello coglet'])
+    page.click("#setsave")
+    st = wait_status(page, "setstatus", ("ok",), contains="talk over it")
+    got = page.evaluate("""async (o) => { const m = await import('/coglet_songs.js');
+        return m.parseSettings(window.__mem.slice(o, o + 4096)); }""", SET["offset"])
+    check(got == {"aec": "on"}, "echo cancellation saved", str(got))
+    page.click("#setread")
+    wait_status(page, "setstatus", ("ok",), contains="current settings")
+    check(page.is_checked("#aec"), "echo cancellation read back")
+    # older firmware never logs "Device AEC": the page says to update first
+    page.evaluate("(l) => { window.__bootLines = l; }", [
+        'I (900) CogletSettings: settings: wake word "(default)", threshold 0, startup (default), reminder (default)',
+        'I (2100) CustomWakeWord: Hello Coglet variant: hello coglet'])
+    page.click("#setsave")
+    st = wait_status(page, "setstatus", ("warn",), contains="update Coglet above first")
+    check("echo cancellation" in st, "older firmware: asked to update first", st)
+    page.uncheck("#aec")
+    page.evaluate("(l) => { window.__bootLines = l; }", [
+        'I (900) CogletSettings: settings: using the firmware defaults',
+        'I (905) CogletSettings: Device AEC: off (firmware default)',
+        'I (2100) CustomWakeWord: Hello Coglet variant: hello coglet'])
+    page.click("#setsave")
+    wait_status(page, "setstatus", ("ok",), contains="Say")
+    got = page.evaluate("""async (o) => { const m = await import('/coglet_songs.js');
+        return m.parseSettings(window.__mem.slice(o, o + 4096)); }""", SET["offset"])
+    check(got == {}, "echo cancellation back to the default (off) stores nothing", str(got))
+    page.fill("#ww", "!!")
+    page.dispatch_event("#ww", "change")
+    n_writes = len(page.evaluate("window.__writes"))
+    page.click("#setsave")
+    st = wait_status(page, "setstatus", ("err",))
+    check(len(page.evaluate("window.__writes")) == n_writes and "English letters" in st, "invalid wake word refused, nothing written")
 
     # unreadable file
     bad = os.path.join(WORK, "notes.mp3")

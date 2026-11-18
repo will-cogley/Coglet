@@ -1,0 +1,9 @@
+# Elf edition overlay. The Firmware workflow builds it next to the
+# standard and Christmas firmware:
+#   idf.py -B build-elf -D SDKCONFIG=build-elf/sdkconfig \
+#          -D SDKCONFIG_DEFAULTS="sdkconfig;sdkconfig.elf" build
+# Locally you can also just pick it in menuconfig:
+#   NMRobotics Coglet Dance -> Firmware edition -> Elf
+CONFIG_COGLET_EDITION_ELF=y
+CONFIG_COGLET_BOOT_SOUND_ELF=y
+CONFIG_COGLET_REMINDER_SOUND_ELF=y

@@ -1,6 +1,7 @@
 #include "coglet_rp2040_sync.h"
 
 #include <cstdio>
+#include <vector>
 
 namespace CogletRp2040 {
 namespace {
@@ -9,10 +10,12 @@ constexpr size_t kChunkBytes = 384;          // -> 512 base64 chars per line
 constexpr int kVersionTimeoutMs = 1500;
 constexpr int kVersionAttempts = 3;
 constexpr int kReadyTimeoutMs = 4000;
-constexpr int kAckTimeoutMs = 1500;
-constexpr int kEndTimeoutMs = 3000;
-constexpr int kCommitTimeoutMs = 8000;
-constexpr int kRetries = 4;
+// Generous: the ESP may be busy (Wi-Fi, audio) and the RP2040 writes flash.
+constexpr int kAckTimeoutMs = 3000;
+constexpr int kEndTimeoutMs = 5000;
+constexpr int kCommitTimeoutMs = 15000;
+constexpr int kRetries = 6;
+constexpr int kCrcTimeoutMs = 1500;
 
 std::string Base64(const uint8_t* data, size_t len) {
     static const char* const kAlphabet =
@@ -123,15 +126,36 @@ SyncResult Sync(Link& link, const char* bundle_id, const BundleFile* files, size
         link.Log("RP2040 bundle " + current + " is up to date");
         return SyncResult::UpToDate;
     }
-    link.Log("RP2040 bundle " + current + " -> " + bundle_id + ", sending " +
-             std::to_string(file_count) + " files");
+    // Which files differ? An updater that can't answer gets everything.
+    std::vector<size_t> todo;
+    bool asked = false, legacy = false;
+    for (size_t i = 0; i < file_count; ++i) {
+        if (!legacy) {
+            const std::string name = files[i].name;
+            std::string got;
+            const bool answered = Exchange(link, "upd:crc?:" + name, "upd:crc:" + name + ":", kCrcTimeoutMs,
+                                           asked ? 1 : 0, &got);
+            if (!answered && !asked) {
+                legacy = true;
+            } else if (answered) {
+                asked = true;
+                char want[32];
+                snprintf(want, sizeof(want), "%u:%08x", static_cast<unsigned>(files[i].size),
+                         static_cast<unsigned>(files[i].crc32));
+                if (got.substr(9 + name.size()) == want) continue;      // already there
+            }
+        }
+        todo.push_back(i);
+    }
+    link.Log("RP2040 bundle " + current + " -> " + bundle_id + ", sending " + std::to_string(todo.size()) +
+             " of " + std::to_string(file_count) + " files" + (legacy ? " (updater without file check)" : ""));
 
-    if (!Exchange(link, std::string("upd:begin:") + bundle_id + ":" + std::to_string(file_count),
+    if (!Exchange(link, std::string("upd:begin:") + bundle_id + ":" + std::to_string(todo.size()),
                   "upd:ready", kReadyTimeoutMs, 1)) {
         link.Log("RP2040 did not start the update");
         return SyncResult::Failed;
     }
-    for (size_t i = 0; i < file_count; ++i) {
+    for (size_t i : todo) {
         if (!SendFile(link, files[i])) {
             link.SendLine("upd:abort");
             return SyncResult::Failed;
@@ -149,6 +173,8 @@ SyncResult Sync(Link& link, const char* bundle_id, const BundleFile* files, size
 
 // ------------------------------------------------------------------ ESP32
 #ifdef ESP_PLATFORM
+#include <atomic>
+
 #include <driver/uart.h>
 #include <esp_log.h>
 #include <esp_timer.h>
@@ -207,6 +233,8 @@ private:
     std::string buffer_;
 };
 
+std::atomic<bool> g_busy{false};
+
 void SyncTask(void*) {
     vTaskDelay(pdMS_TO_TICKS(kBootDelayMs));
     uart_flush_input(UART_PORT_NUM);
@@ -229,13 +257,19 @@ void SyncTask(void*) {
         auto& app = Application::GetInstance();
         app.Schedule([&app]() { app.ResendStateToRp2040(); });
     }
+    g_busy = false;
     vTaskDelete(nullptr);
 }
 
 }  // namespace
 
+bool SyncBusy() { return g_busy; }
+
 void StartSyncTask() {
-    xTaskCreate(SyncTask, "rp2040_sync", 6144, nullptr, 2, nullptr);
+    g_busy = true;
+    // Above the audio processing tasks (3): it mostly waits on the UART, but a
+    // starved task misses acks and the RP2040 waits with its servos released.
+    if (xTaskCreate(SyncTask, "rp2040_sync", 6144, nullptr, 5, nullptr) != pdPASS) g_busy = false;
 }
 
 }  // namespace CogletRp2040

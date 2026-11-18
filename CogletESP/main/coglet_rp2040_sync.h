@@ -3,8 +3,10 @@
 // The ESP firmware carries the whole RP2040 program (CogletESP/RP2040/*.py,
 // packed at build time by tools/rp2040_bundle/build_bundle.py). Shortly after
 // boot the ESP asks the RP2040 for its bundle id over the existing UART link;
-// if it differs, the ESP sends every file and the RP2040 (coglet_updater.py)
-// stages, verifies and commits them, then restarts. Users only ever flash the
+// if it differs, the ESP asks for each file's size and CRC and sends only the
+// files that changed (everything, if the RP2040's updater is too old to
+// answer). The RP2040 (coglet_updater.py) stages, verifies and commits them,
+// then restarts. Users only ever flash the
 // ESP; the board's USB switch can stay on ESP.
 //
 // The protocol logic (Sync) is plain C++ behind the Link interface so it can
@@ -55,6 +57,10 @@ SyncResult Sync(Link& link, const char* bundle_id, const BundleFile* files, size
 #ifdef ESP_PLATFORM
 // Starts the background task that syncs the RP2040 a few seconds after boot.
 void StartSyncTask();
+// True from StartSyncTask() until the check / transfer has finished. Boot
+// Auto-Awake waits for it, so a transfer never competes with a voice session
+// (the RP2040 holds its servos released while it receives files).
+bool SyncBusy();
 #endif
 
 }  // namespace CogletRp2040

@@ -1,0 +1,9 @@
+# Christmas edition overlay. The Firmware workflow builds it next to the
+# standard firmware:
+#   idf.py -B build-christmas -D SDKCONFIG=build-christmas/sdkconfig \
+#          -D SDKCONFIG_DEFAULTS="sdkconfig;sdkconfig.christmas" build
+# Locally you can also just pick it in menuconfig:
+#   NMRobotics Coglet Dance -> Firmware edition -> Christmas
+CONFIG_COGLET_EDITION_CHRISTMAS=y
+CONFIG_COGLET_BOOT_SOUND_CHRISTMAS=y
+CONFIG_COGLET_REMINDER_SOUND_CHRISTMAS=y

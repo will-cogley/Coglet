@@ -58,6 +58,81 @@ every file as `<name>.tmp`, checks the sizes, renames them into place,
 records the bundle id in `coglet_bundle.txt` and soft-reboots the RP2040.
 Nothing is replaced until every file has been written.
 
+## Firmware editions
+
+The page offers the editions of the same firmware that are published:
+
+* **Standard**: Mecha, Evil and Cat dances;
+* **Christmas**: Silent Night, Jingle Bells and Joy to the World dances, with
+  the Christmas startup and reminder sounds as defaults;
+* **Elf**: Deck the Halls, God Rest Ye Merry Gentlemen and We Wish You a
+  Merry Christmas dances, with the Elf startup and reminder sounds as defaults;
+* **Snowman**: Brahms' Lullaby, Good King Wenceslas and Carol of the Bells
+  (Leontovych's Shchedryk) dances, with the Snowman startup and reminder
+  sounds as defaults.
+
+An edition whose `firmware-<edition>/manifest.json` is missing is simply not
+offered.
+
+Only one set of dance tracks fits next to everything else, so each edition is
+its own build (menuconfig: *NMRobotics Coglet Dance → Firmware edition*).
+Switching is a normal **Connect & Update** with the other choice; Wi-Fi,
+settings and songs are kept, and the RP2040 doesn't need an update because
+its program knows the choreographies of every edition. The page remembers
+the choice. The boot log shows `Coglet firmware edition: christmas` (or
+`elf`, `snowman`, `standard`).
+
+## Christmas look
+
+From December 1 to January 6 (the visitor's own date) the page turns
+festive, all drawn in code (inline SVG and CSS, no image files):
+
+* an evergreen garland around the window with a gold ribbon, berries and pine
+  cones, red bows in the top corners and sparkles on the garland;
+* coloured lights on the top garland that twinkle in a wave from left to
+  right, and baubles hanging from it that swing gently;
+* falling gold stars with little faces (kissing, smiling, crying) in the
+  light look, and detailed snowflakes in the dark look;
+* warm colours and a 🎄 by the title.
+
+With *reduce motion* nothing falls, swings or twinkles. A button under the
+title turns the look off for the rest of that season (it comes back the next
+December); `?season=christmas` or `?season=plain` forces either look for
+testing. Text keeps at least 7:1 contrast and buttons 4.5:1 in both light and
+dark, and status messages start with ✓ / ⚠ / ✕ so they don't depend on colour.
+
+## Languages
+
+The page speaks English, German, Spanish and Japanese. It picks the
+browser's language (else English), the 🌐 menu next to *Appearance* switches
+at any time, and the choice is remembered; `?lang=de` / `es` / `ja` / `en`
+forces one. Everything the visitor reads is translated: the page text, the
+board photo labels, and the messages shown while the page talks to Coglet.
+The device log itself stays as Coglet writes it (English), so logs posted in
+the community read the same for everyone.
+
+How it works (`tools/web_flasher/coglet_i18n.js`):
+
+* page text is marked with `data-i18n="key"` (and `data-i18n-aria` for
+  `aria-label`); the English stays in `index.html`, so the page also works
+  if the translations can't load;
+* script messages use `t("key", { name: value })`, with English in the
+  `en` dictionary; plurals use the browser's plural rules and numbers its
+  number format (`0,5 MB` in German and Spanish);
+* the `<html lang>` follows the language, so screen readers pronounce it
+  correctly; board photo labels shrink to fit when a translation is longer.
+
+Adding a language: add it to `LANGS`, a dictionary with every key, and an
+`<option>` to the 🌐 menu. `tests/web_flasher` checks that every key is
+translated with the same `{placeholders}` and markup, and that nothing
+overflows on desktop or phone in each language.
+
+## Appearance
+
+*Appearance* next to the title picks light, dark, **day and night** (light
+from 7:00 to 19:00 on the visitor's clock, dark otherwise; checked every
+minute) or, by default, the browser's own setting. The choice is remembered.
+
 ## Settings
 
 The *Settings* card changes, without rebuilding:
@@ -66,8 +141,9 @@ The *Settings* card changes, without rebuilding:
 |---|---|---|
 | Wake word | English words, e.g. `hey coglet` (lowercase letters, `'` and spaces, 3-40 characters) | Custom Wake Word |
 | Wake-up sensitivity | 1-50 (lower wakes up more easily) | Custom Wake Word Threshold |
-| Startup sound | Mecha, Evil, Cat | Startup Sound |
-| Reminder sound | Mecha, Evil, Cat | Reminder Sound |
+| Startup sound | Mecha, Evil, Cat, Christmas, Elf, Snowman | Startup Sound |
+| Reminder sound | Mecha, Evil, Cat, Christmas, Elf, Snowman | Reminder Sound |
+| Talk over Coglet | on / off (device-side AEC) | Coglet: start with device AEC off |
 
 The wake word is plain text: the MultiNet model on Coglet turns it into
 phonemes itself, so any English phrase works without a list. `hello coglet`
@@ -75,18 +151,38 @@ keeps its extra accent variants (`main/audio/wake_words/custom_wake_word.cc`).
 If the model can't use a phrase (an odd spelling it can't turn into
 phonemes), Coglet falls back to the firmware's own wake word and logs
 `Wake word "..." from settings can't be used`; the page shows that too, so
-Coglet can always still be woken up. All three startup and all three
-reminder sounds are in the firmware (about 40 KB more than one of each), so
-switching needs no rebuild.
+Coglet can always still be woken up. All four startup and all four
+reminder sounds are in the firmware, so switching needs no rebuild.
+
+**Talk over Coglet** switches our device-side AEC
+([coglet-device-aec.md](coglet-device-aec.md)): with it on, Coglet listens
+while it speaks and can be interrupted without the wake word. The published
+firmware has AEC built in but off (`CONFIG_USE_DEVICE_AEC=y` with
+`CONFIG_COGLET_AEC_DEFAULT_OFF=y`); with it off, nothing of the AEC path
+runs, so it behaves exactly like a build without AEC. AEC is decided once at
+boot, so saving restarts Coglet (about 20 seconds; the page says so). The
+page confirms the switch from the boot log (`Device AEC: on (from
+settings)`); older firmware never logs that line, and the page asks to update
+first.
+
+Only values that differ from the firmware's defaults are saved; anything left
+at its default keeps following the firmware. So switching to the Christmas
+edition brings the Christmas sounds along unless another sound was chosen,
+and **Use defaults** then **Save to Coglet** clears the settings completely.
+The defaults compared against are those of the edition selected on the page.
+Settings saved by older versions of the page store every value; saving once
+with the new page fixes that.
 
 Settings are one 4 KB sector right before the song library
 (`main/coglet_settings.h`): `CGST`, version, length, CRC-32, then
 `key=value` lines. Missing or invalid values fall back to the menuconfig
-defaults, which `make_manifest.py` publishes in `manifest.json` so the page
+defaults, also after `idf.py flash` (which never writes this sector either:
+a value saved here wins over menuconfig until it is cleared), which `make_manifest.py` publishes in `manifest.json` so the page
 can show them. Firmware updates never write there. At boot:
 
 ```
-I (900) CogletSettings: settings: wake word "hey coglet", threshold 3, startup cat, reminder evil
+I (900) CogletSettings: settings: wake word "hey coglet", threshold 3, startup cat, reminder evil, aec on
+I (905) CogletSettings: Device AEC: on (from settings)
 ```
 
 ## My songs
@@ -135,7 +231,10 @@ is a hash of all files, so any change to any RP2040 file means a new id.
 
 About 5 s after boot the ESP asks the RP2040 for its bundle id over the
 existing UART link (`main/coglet_rp2040_sync.cc`). If the id differs, the ESP
-sends every file:
+asks for each file's size and CRC (`upd:crc?:<name>`) and sends only the
+files that changed; an RP2040 updater from before that question doesn't
+answer it and gets every file. Boot Auto-Awake waits until this is done (at
+most 2 minutes), so a transfer never runs during the first conversation:
 
 * The RP2040 (`coglet_updater.py`) writes each file as `<name>.new`, checks
   its size and CRC-32, and only renames the files over the old ones once all
@@ -143,9 +242,13 @@ sends every file:
 * The list of files being renamed is written first, so if the power is cut
   halfway through, the next boot finishes the job.
 * Each piece is acknowledged and resent if needed. If the transfer fails,
-  the RP2040 keeps its old program and the ESP tries again on the next boot.
-* The transfer takes roughly half a minute. The servos relax during it, then
-  the RP2040 restarts and the ESP re-sends the current state.
+  the RP2040 restarts with its old program (the servos power up again) and
+  the ESP tries again on the next boot. Staged `.new` files left by a
+  transfer that was stopped halfway (for example by opening Thonny) are
+  removed at the next boot.
+* A full transfer takes roughly half a minute at the link's 115200 baud; a
+  usual update (a few changed files) takes a few seconds. The servos relax
+  during it, then the RP2040 restarts and the ESP re-sends the current state.
 
 The RP2040 is organised so that a broken update can't lock it out:
 
@@ -192,14 +295,21 @@ git push origin v2.1.0
 
 The **Firmware** workflow (`.github/workflows/firmware.yml`):
 
-1. builds the firmware in the official `espressif/idf:v5.5.3` container,
-   with the repository's `sdkconfig` (this also packs the RP2040 program);
+1. builds the firmware four times in the official `espressif/idf:v5.5.3`
+   container: the standard edition with the repository's `sdkconfig`, and
+   the Christmas, Elf and Snowman editions in `build-<edition>/` with
+   `sdkconfig.<edition>` on top (all also pack the RP2040 program);
 2. copies every flash part listed in `build/flasher_args.json` and writes
-   `firmware/manifest.json` (offsets, sizes, MD5, song library location,
-   link to the release notes), using `tools/web_flasher/make_manifest.py`;
-3. deploys the page (`index.html`, `coglet_songs.js`), the firmware and the
+   `firmware/manifest.json` (offsets, sizes, MD5, edition, settings and song
+   library location, link to the release notes), and the same for the
+   other editions into `firmware-christmas/`, `firmware-elf/` and
+   `firmware-snowman/`, using
+   `tools/web_flasher/make_manifest.py --edition`;
+3. deploys the page (`index.html`, `coglet_songs.js`, `coglet_i18n.js`), the firmware and the
    RP2040 files (for the one-time setup) to GitHub Pages;
-4. attaches `coglet-firmware-<version>.zip` to the GitHub release. The zip
+4. attaches `coglet-firmware-<version>.zip` and
+   `coglet-firmware-<version>-<edition>.zip` for Christmas, Elf and Snowman
+   to the GitHub release. Each zip
    contains the parts and an esptool command line for manual flashing.
 
 You can also start the workflow by hand from the **Actions** tab. That builds
@@ -225,8 +335,11 @@ turned on "reduce motion". The switch pictures have text equivalents.
 ### Limits
 * Web Serial only works in Chromium-based desktop browsers, on HTTPS or
   `localhost`. Converting songs also needs WebCodecs (Chrome / Edge 94+).
-* Local testing: copy `index.html` **and** `coglet_songs.js` next to the
-  `firmware/` and `rp2040/` folders.
+* Local testing: copy `index.html`, `coglet_songs.js` **and** `coglet_i18n.js` next to the
+  `firmware/` and `rp2040/` folders. For the other editions, also run
+  `make_manifest.py --edition christmas` (or `elf`, `snowman`) on that
+  edition's build;
+  without them the page simply shows no edition choice.
 * The published firmware is the repository's default build. Custom builds
   (own songs in `Music/`, menuconfig changes) still need ESP-IDF.
 * The one-time RP2040 setup needs MicroPython already on the RP2040, which

@@ -57,3 +57,22 @@ if (huge !== null) throw new Error("song larger than the area should not fit");
 
 writeFileSync(`${out}/lib_empty.bin`, area());
 console.log("images written; header total after add:", p2.total, "after compact:", p4.total);
+
+// settings sectors (checked by test_library.cc against main/coglet_settings.cc)
+import { settingsSector, parseSettings, cleanWakeWord } from "../../tools/web_flasher/coglet_songs.js";
+writeFileSync(`${out}/set_full.bin`, settingsSector({ wake_word: "hey coglet", threshold: 3, startup: "cat", reminder: "evil" }));
+writeFileSync(`${out}/set_reminder.bin`, settingsSector({ reminder: "cat" }));
+writeFileSync(`${out}/set_christmas.bin`, settingsSector({ startup: "christmas", reminder: "christmas" }));
+writeFileSync(`${out}/set_elf.bin`, settingsSector({ startup: "elf", reminder: "elf" }));
+writeFileSync(`${out}/set_snowman.bin`, settingsSector({ startup: "snowman", reminder: "snowman" }));
+writeFileSync(`${out}/set_aec.bin`, settingsSector({ aec: "on" }));
+writeFileSync(`${out}/set_aec_off.bin`, settingsSector({ aec: "off", reminder: "cat" }));
+const bad = settingsSector({ wake_word: "hello robot", threshold: 12 });
+bad[20] ^= 1;
+writeFileSync(`${out}/set_damaged.bin`, bad);
+if (cleanWakeWord("  Hey,  Coglet!! ") !== "hey coglet") throw new Error("cleanWakeWord");
+if (JSON.stringify(parseSettings(settingsSector({ wake_word: "hey coglet", threshold: 3, reminder: "evil" }))) !==
+    JSON.stringify({ wake_word: "hey coglet", threshold: 3, reminder: "evil" })) throw new Error("parseSettings");
+let refused = false;
+try { settingsSector({ wake_word: "héllo" }); } catch (e) { refused = true; }
+if (!refused) throw new Error("bad wake word accepted");

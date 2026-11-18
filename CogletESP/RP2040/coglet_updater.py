@@ -6,6 +6,9 @@
 #
 # Protocol (text lines; the ESP waits for every reply before sending more):
 #   ESP -> "upd:ver?"                         RP -> "upd:ver:<bundle id>|none"
+#   ESP -> "upd:crc?:<name>"                  RP -> "upd:crc:<name>:<size>:<crc32>" | "upd:crc:<name>:none"
+#          (the ESP then sends only the files that differ; updaters from
+#          before this line don't answer, and get every file)
 #   ESP -> "upd:begin:<bundle id>:<files>"    RP -> "upd:ready"
 #   ESP -> "upd:file:<name>:<size>:<crc32>"   RP -> "upd:ok:f"
 #   ESP -> "upd:d:<seq>:<base64>"             RP -> "upd:ok:<seq>"   (repeats are re-acked)
@@ -113,9 +116,42 @@ def bundle_id():
         return "none"
 
 
+def file_crc_line(name):
+    """Reply to "upd:crc?:<name>": size and CRC32 of the file we have."""
+    if not _valid_name(name):
+        return "upd:crc:%s:none" % name
+    try:
+        size = 0
+        crc = 0
+        with open(name, "rb") as f:
+            while True:
+                block = f.read(1024)
+                if not block:
+                    break
+                size += len(block)
+                crc = _crc32(block, crc)
+        return "upd:crc:%s:%d:%08x" % (name, size, crc & 0xFFFFFFFF)
+    except OSError:
+        return "upd:crc:%s:none" % name
+
+
+def _remove_stale_staged():
+    """Staged files of a transfer that never got committed (Thonny stopped it,
+    the power went off): they are never used, so clean them up."""
+    try:
+        names = os.listdir()
+    except Exception:
+        return
+    for name in names:
+        if name.endswith(".new"):
+            _remove(name)
+            print("[UPD] removed a leftover", name)
+
+
 def finish_pending_commit():
     """Complete a commit that was interrupted (e.g. by a power cut)."""
     if not _exists(COMMIT_FILE):
+        _remove_stale_staged()
         return False
     try:
         with open(COMMIT_FILE) as f:
@@ -225,6 +261,8 @@ class Session:
                 return False
             elif line == "upd:ver?":
                 _send(self.uart, "upd:ver:" + bundle_id())
+            elif line.startswith("upd:crc?:"):
+                _send(self.uart, file_crc_line(line[9:]))
             elif line.startswith("upd:begin:"):
                 self._abort("restarted")
                 self.__init__(self.uart, self.reader)
@@ -312,6 +350,9 @@ def handle_line(line, uart, before_session=None):
     if line == "upd:ver?":
         _send(uart, "upd:ver:" + bundle_id())
         return True
+    if line.startswith("upd:crc?:"):
+        _send(uart, file_crc_line(line[9:]))
+        return True
     if line.startswith("upd:begin:"):
         if before_session:
             try:
@@ -324,7 +365,12 @@ def handle_line(line, uart, before_session=None):
             session_uart = uart
         ok = Session(session_uart).run(line)
         _sleep_ms(200)
-        if ok and machine is not None:
+        # Restart either way: with the new files after a commit, or with the
+        # old ones after a failed transfer, so the servos power up again
+        # instead of staying released.
+        if not ok:
+            print("[UPD] transfer failed; restarting with the current program")
+        if machine is not None:
             machine.reset()
         return True
     return line.startswith("upd:")
@@ -353,6 +399,8 @@ def recovery():
             # "recovery" never matches a real bundle id, so the ESP always
             # re-sends everything.
             _send(uart, "upd:ver:recovery")
+        elif line.startswith("upd:crc?:"):
+            _send(uart, file_crc_line(line[9:]))
         elif line.startswith("upd:begin:"):
             if Session(uart, reader).run(line) and machine is not None:
                 _sleep_ms(200)

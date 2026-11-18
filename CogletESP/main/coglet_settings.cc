@@ -67,8 +67,11 @@ bool Parse(const uint8_t* data, size_t size, Values& out, std::string* why) {
                 v = v * 10 + (c - '0');
             }
             if (digits && v >= 1 && v <= 99) out.threshold = v;
+        } else if (key == "aec") {
+            if (value == "on" || value == "off") out.aec = value;
         } else if (key == "startup" || key == "reminder") {
-            if (value == "mecha" || value == "evil" || value == "cat") {
+            if (value == "mecha" || value == "evil" || value == "cat" || value == "christmas" ||
+                value == "elf" || value == "snowman") {
                 (key == "startup" ? out.startup : out.reminder) = value;
             }
         }
@@ -112,11 +115,32 @@ const Values& Get() {
         ESP_LOGI(TAG, "settings: %s, using the firmware defaults", why.c_str());
         return values;
     }
-    ESP_LOGI(TAG, "settings: wake word \"%s\", threshold %d, startup %s, reminder %s",
+    ESP_LOGI(TAG, "settings: wake word \"%s\", threshold %d, startup %s, reminder %s, aec %s",
              values.wake_word.empty() ? "(default)" : values.wake_word.c_str(), values.threshold,
              values.startup.empty() ? "(default)" : values.startup.c_str(),
-             values.reminder.empty() ? "(default)" : values.reminder.c_str());
+             values.reminder.empty() ? "(default)" : values.reminder.c_str(),
+             values.aec.empty() ? "(default)" : values.aec.c_str());
     return values;
+}
+
+bool DeviceAec() {
+#if CONFIG_USE_DEVICE_AEC
+    static const bool on = [] {
+        const std::string& v = Get().aec;
+#if CONFIG_COGLET_AEC_DEFAULT_OFF
+        const bool def = false;
+#else
+        const bool def = true;
+#endif
+        const bool result = v.empty() ? def : v == "on";
+        ESP_LOGI("CogletSettings", "Device AEC: %s (%s)", result ? "on" : "off",
+                 v.empty() ? "firmware default" : "from settings");
+        return result;
+    }();
+    return on;
+#else
+    return false;
+#endif
 }
 
 }  // namespace CogletSettings

@@ -1,3 +1,5 @@
+#include "coglet_edition.h"
+#include "coglet_settings.h"
 #include "wifi_board.h"
 #include "codecs/no_audio_codec.h"
 #include "application.h"
@@ -343,9 +345,9 @@ private:
         std::string dance_desc =
             "Call when the user asks Coglet to dance / groove / move to music. Coglet ends the current "
             "conversation, plays a song and dances to it, then starts talking again by itself.\n"
-            "style (built-in ~30 s tracks): mecha = heavy mecha electro, evil = gloomy gothic, "
-            "cat = gentle anime cat pop, random = a random built-in track "
-            "(use it when the user did not ask for anything specific).\n";
+            "style (built-in ~30 s tracks): " + std::string(CogletEdition::kDanceStylesHelp) +
+            ", random = a random built-in track (use it when the user did not ask for anything "
+            "specific).\n";
 #if CONFIG_COGLET_MUSIC
         if (CogletMusic::Count() > 0) {
             dance_desc += "The user's own songs (pass the exact name as style, or \"mine\" for a random one "
@@ -408,7 +410,10 @@ public:
         // Coglet has no hardware AEC reference path (SPH0645 + MAX98357A on
         // separate I2S ports), so take the reference digitally from the
         // speaker DMA. Runs once, before AudioService starts the codec.
+        // Only when AEC is on for this boot (web flasher Settings / menuconfig):
+        // otherwise the audio path is exactly the one without AEC.
         static const bool aec_reference_ready = [] {
+            if (!CogletSettings::DeviceAec()) return false;
             const bool ok = audio_codec.EnableSoftwareAecReference(
                 CONFIG_COGLET_AEC_REF_DELAY_MS * 1000);
             if (!ok) {

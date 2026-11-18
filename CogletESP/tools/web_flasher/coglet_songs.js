@@ -10,6 +10,14 @@
 // Everything except decodeFile()/encodeSong() is plain JavaScript, so it also
 // runs under Node for the tests.
 
+// Messages shown on the page go through the page's translations when they
+// are loaded (coglet_i18n.js); otherwise (Node tests) the English text is used.
+function msg(key, en, vars) {
+  const i18n = globalThis.CogletI18n;
+  if (i18n) return i18n.t(key, vars);
+  return vars ? en.replace(/\{(\w+)\}/g, (m, k) => (vars[k] !== undefined ? String(vars[k]) : m)) : en;
+}
+
 export const SR = 11025;          // analysis sample rate
 export const HOP = 256;
 export const FPS = SR / HOP;
@@ -207,7 +215,7 @@ function chooseTempo(o, forcedBpm) {
     const score = mean * comb * tempoPrior((60 * FPS) / q) ** 1.5;
     if (best === null || score > best[0]) best = [score, q, beats];
   }
-  if (!best) throw new Error("no beat found");
+  if (!best) throw new Error(msg("songs.err.noBeat", "no beat found"));
   return [best[1], best[2]];
 }
 
@@ -519,7 +527,7 @@ export async function encodeOpus(pcm, bitrateKbps = 32) {
     opus: { frameDuration: 60000, application: "audio", complexity: 10 },
   };
   const support = await AudioEncoder.isConfigSupported(config);
-  if (!support.supported) throw new Error("this browser can't encode Opus; please use Chrome or Edge");
+  if (!support.supported) throw new Error(msg("songs.err.noOpus", "this browser can't encode Opus; please use Chrome or Edge"));
   const packets = [];
   let preSkip = 312;
   let error = null;
@@ -561,17 +569,17 @@ export async function encodeOpus(pcm, bitrateKbps = 32) {
 // File -> song ready for the library. opts: {name, preset: "auto"|"calm"|"energetic", bpm, maxSeconds, bitrate}
 export async function makeSong(file, opts, progress = () => {}) {
   const maxSeconds = opts.maxSeconds || 60;
-  progress("Reading the file…");
+  progress(msg("songs.step.read", "Reading the file…"));
   const a = await decodeFile(file, SR, maxSeconds);
   const total = a.duration;
   const seconds = Math.min(total, maxSeconds);
-  if (seconds < 3) throw new Error("the song is too short (" + seconds.toFixed(1) + " s)");
+  if (seconds < 3) throw new Error(msg("songs.err.short", "the song is too short ({seconds} s)", { seconds: seconds.toFixed(1) }));
   const trimmed = total > maxSeconds + 0.5;
-  progress("Finding the beat…");
+  progress(msg("songs.step.beat", "Finding the beat…"));
   await new Promise((r) => setTimeout(r, 0));
   const forced = opts.preset && opts.preset !== "auto" ? opts.preset : null;
   const { beats, info } = analyse11k(a.pcm, seconds, forced, opts.bpm || null);
-  progress("Converting for Coglet…");
+  progress(msg("songs.step.convert", "Converting for Coglet…"));
   const p = await decodeFile(file, PLAY_RATE, maxSeconds);
   const ready = prepareForPlayback(p.pcm, PLAY_RATE, seconds, trimmed);
   const ogg = await encodeOpus(ready, opts.bitrate || 32);
@@ -686,7 +694,7 @@ export function blockFootprint(song) {
 // compact=true means existing songs move (their data must be read first and
 // passed as keep[i].data).
 export function planLibrary(keep, add, areaSize, { compact = false } = {}) {
-  if (keep.length + add.length > LIB_MAX_SONGS) throw new Error("Coglet holds at most " + LIB_MAX_SONGS + " songs");
+  if (keep.length + add.length > LIB_MAX_SONGS) throw new Error(msg("songs.err.max", "Coglet holds at most {max} songs", { max: LIB_MAX_SONGS }));
   const writes = [];
   const entries = [];
   let end = LIB_SECTOR;
@@ -729,7 +737,7 @@ export function usedBytes(entries) {
 // Layout: main/coglet_settings.h. "CGST", u16 version, u16 length, u32 CRC-32,
 // then "key=value" lines.
 export const SETTINGS_SIZE = 4096;
-export const SOUNDS = ["mecha", "evil", "cat"];   // startup and reminder sounds
+export const SOUNDS = ["mecha", "evil", "cat", "christmas", "elf", "snowman"];   // startup and reminder sounds
 export const REMINDERS = SOUNDS;
 
 // Lowercase English letters, apostrophes and single spaces, 3-40 characters.
@@ -742,15 +750,15 @@ export function validWakeWord(phrase) {
     !/ {2}/.test(phrase) && phrase === phrase.trim();
 }
 
-export function settingsSector({ wake_word, threshold, startup, reminder }) {
+export function settingsSector({ wake_word, threshold, startup, reminder, aec }) {
   const lines = [];
   if (wake_word) {
-    if (!validWakeWord(wake_word)) throw new Error("the wake word can only use English letters and spaces");
+    if (!validWakeWord(wake_word)) throw new Error(msg("set.err.wakeLetters", "the wake word can only use English letters and spaces"));
     lines.push("wake_word=" + wake_word);
   }
   if (threshold) {
     const t = Math.round(threshold);
-    if (t < 1 || t > 99) throw new Error("the sensitivity must be between 1 and 99");
+    if (t < 1 || t > 99) throw new Error(msg("set.err.threshold", "the sensitivity must be between 1 and 99"));
     lines.push("threshold=" + t);
   }
   if (startup) {
@@ -760,6 +768,10 @@ export function settingsSector({ wake_word, threshold, startup, reminder }) {
   if (reminder) {
     if (!SOUNDS.includes(reminder)) throw new Error("unknown reminder sound");
     lines.push("reminder=" + reminder);
+  }
+  if (aec) {
+    if (aec !== "on" && aec !== "off") throw new Error("unknown echo cancellation value");
+    lines.push("aec=" + aec);
   }
   const text = new TextEncoder().encode(lines.join("\n") + "\n");
   const s = new Uint8Array(SETTINGS_SIZE).fill(0xff);
@@ -789,6 +801,7 @@ export function parseSettings(sector) {
     if (k === "threshold" && /^\d{1,2}$/.test(v) && +v >= 1) out.threshold = +v;
     if (k === "startup" && SOUNDS.includes(v)) out.startup = v;
     if (k === "reminder" && SOUNDS.includes(v)) out.reminder = v;
+    if (k === "aec" && (v === "on" || v === "off")) out.aec = v;
   }
   return out;
 }

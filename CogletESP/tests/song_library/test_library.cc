@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "coglet_music.h"
+#include "coglet_settings.h"
 
 namespace CogletMusic {
 const Song* const kSongs = nullptr;
@@ -72,6 +73,40 @@ int main(int, char** argv) {
     // zlib CRC check value
     const char* check = "123456789";
     assert(Crc32(reinterpret_cast<const uint8_t*>(check), 9) == 0xCBF43926u);
+    // settings sector written by the page
+    {
+        CogletSettings::Values v;
+        auto full = Load(dir + "/set_full.bin");
+        assert(CogletSettings::Parse(full.data(), full.size(), v));
+        assert(v.wake_word == "hey coglet" && v.threshold == 3 && v.startup == "cat" && v.reminder == "evil");
+        auto rem = Load(dir + "/set_reminder.bin");
+        assert(CogletSettings::Parse(rem.data(), rem.size(), v));
+        assert(v.wake_word.empty() && v.threshold == 0 && v.startup.empty() && v.reminder == "cat");
+        auto xm = Load(dir + "/set_christmas.bin");
+        assert(CogletSettings::Parse(xm.data(), xm.size(), v));
+        assert(v.startup == "christmas" && v.reminder == "christmas");
+        auto el = Load(dir + "/set_elf.bin");
+        assert(CogletSettings::Parse(el.data(), el.size(), v));
+        assert(v.startup == "elf" && v.reminder == "elf");
+        auto sn = Load(dir + "/set_snowman.bin");
+        assert(CogletSettings::Parse(sn.data(), sn.size(), v));
+        assert(v.startup == "snowman" && v.reminder == "snowman");
+        auto ae = Load(dir + "/set_aec.bin");
+        assert(CogletSettings::Parse(ae.data(), ae.size(), v));
+        assert(v.aec == "on" && v.startup.empty());
+        auto aeo = Load(dir + "/set_aec_off.bin");
+        assert(CogletSettings::Parse(aeo.data(), aeo.size(), v));
+        assert(v.aec == "off" && v.reminder == "cat");
+        assert(CogletSettings::Parse(xm.data(), xm.size(), v) && v.aec.empty());
+        auto dmg = Load(dir + "/set_damaged.bin");
+        std::string w;
+        assert(!CogletSettings::Parse(dmg.data(), dmg.size(), v, &w) && w == "damaged");
+        auto blank = std::vector<uint8_t>(4096, 0xFF);
+        assert(!CogletSettings::Parse(blank.data(), blank.size(), v, &w) && w == "empty");
+        assert(CogletSettings::ValidWakeWord("hey coglet") && CogletSettings::ValidWakeWord("what's up"));
+        assert(!CogletSettings::ValidWakeWord("Hey") && !CogletSettings::ValidWakeWord("hey  coglet") &&
+               !CogletSettings::ValidWakeWord("hi") && !CogletSettings::ValidWakeWord(" hey"));
+    }
     std::printf("song library parser: all checks passed\n");
     return 0;
 }

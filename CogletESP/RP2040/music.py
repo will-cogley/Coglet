@@ -1,6 +1,7 @@
 # Coglet dance player (MicroPython / RP2040)
 #
 # ESP -> UART:  "dance:mecha" | "dance:evil" | "dance:cat"   start a dance
+#               "dance:lyrical" | "dance:classic" | "dance:grand"  (Christmas edition)
 #               "dance:stop"                                    stop now (any mode)
 #
 # Custom songs from the Music folder (groove mode, beats streamed live):
@@ -21,7 +22,30 @@ import time
 
 import animation
 from animation import servos
-import dance_data
+
+# Choreography modules, imported on first use so only the edition's dances
+# take memory (the standard firmware never loads the other editions' ones).
+XMAS_TRACKS = ("lyrical", "classic", "grand")
+ELF_TRACKS = ("workshop", "mischief", "party")
+SNOW_TRACKS = ("lullaby", "stomp", "blizzard")
+
+
+def _module(name):
+    if name in XMAS_TRACKS:
+        return "dance_xmas"
+    if name in ELF_TRACKS:
+        return "dance_elf"
+    if name in SNOW_TRACKS:
+        return "dance_snow"
+    return "dance_data"
+
+
+def _track(name):
+    module = _module(name)
+    try:
+        return __import__(module).TRACKS.get(name)
+    except ImportError:
+        return None
 
 # ---------------------------------------------------------------- sync tuning
 # ESP PlaySound() -> sound actually leaving the speaker (decode + DMA).
@@ -76,6 +100,136 @@ STYLES = {
         "gaze": 19,
         "pose_end": {"YAW": 90, "ROL": 72, "PIT": 40, "MOU": 40, "LID": 150,
                      "EAL": 75, "EAR": 115},
+    },
+    # ---- Christmas edition (choreography: dj/choreo_xmas.py). These dances
+    # mostly use "to"/"pulse" with their own speeds; "motion" is the default.
+    "lyrical": {
+        # Silent Night: eyes closed throughout, a soft waltz, falls asleep
+        "base": {"YAW": 90, "ROL": 90, "PIT": 55, "MOU": 150, "LID": 104,
+                 "EYL": 90, "EYR": 90, "EAL": 118, "EAR": 82},
+        "motion": {"PIT": (40, 200), "ROL": (25, 150), "YAW": (20, 120),
+                   "EAL": (60, 400), "EAR": (60, 400), "LID": (40, 300),
+                   "MOU": (200, 1500), "EYL": (30, 200), "EYR": (30, 200)},
+        "nod": {"small": (5, 300)},
+        "sway": 7,
+        "turn": 7,
+        "gaze": 6,
+        "pose_end": {"YAW": 90, "ROL": 97, "PIT": 68, "MOU": 150, "LID": 102,
+                     "EYL": 90, "EYR": 90, "EAL": 138, "EAR": 62},
+    },
+    "classic": {
+        # Jingle Bells: playful; head speed kept moderate for a Santa hat
+        "base": {"YAW": 90, "ROL": 90, "PIT": 45, "MOU": 150, "LID": 150,
+                 "EYL": 90, "EYR": 90, "EAL": 110, "EAR": 90},
+        "motion": {"PIT": (420, 4000), "ROL": (300, 2000), "YAW": (260, 1400),
+                   "EAL": (750, 9000), "EAR": (750, 9000), "LID": (900, 9000),
+                   "MOU": (1500, 9000), "EYL": (400, 4500), "EYR": (400, 4500)},
+        "nod": {"small": (9, 110), "big": (14, 140)},
+        "sway": 14,
+        "turn": 20,
+        "gaze": 18,
+        "pose_end": {"YAW": 90, "ROL": 100, "PIT": 32, "MOU": 150, "LID": 150,
+                     "EAL": 72, "EAR": 128},
+    },
+    "grand": {
+        # Joy to the World: starts bowed, big moves on the beat, ends with a bow
+        "base": {"YAW": 90, "ROL": 90, "PIT": 72, "MOU": 150, "LID": 112,
+                 "EYL": 90, "EYR": 90, "EAL": 140, "EAR": 60},
+        "motion": {"PIT": (160, 1500), "ROL": (120, 900), "YAW": (130, 700),
+                   "EAL": (500, 5000), "EAR": (500, 5000), "LID": (300, 3000),
+                   "MOU": (800, 5000), "EYL": (200, 2000), "EYR": (200, 2000)},
+        "nod": {"small": (8, 220), "big": (14, 260)},
+        "sway": 14,
+        "turn": 28,
+        "gaze": 14,
+        "pose_end": {"YAW": 90, "ROL": 90, "PIT": 74, "MOU": 150, "LID": 116,
+                     "EAL": 138, "EAR": 62},
+    },
+    # ---- Elf edition (choreography: dj/choreo_elf.py): quick and cheeky.
+    "workshop": {
+        # Deck the Halls in a toy workshop: hammering nods, ears on the hammers
+        "base": {"YAW": 90, "ROL": 90, "PIT": 48, "MOU": 150, "LID": 150,
+                 "EYL": 90, "EYR": 90, "EAL": 110, "EAR": 90},
+        "motion": {"PIT": (420, 4000), "ROL": (300, 2000), "YAW": (240, 1400),
+                   "EAL": (800, 9000), "EAR": (800, 9000), "LID": (900, 9000),
+                   "MOU": (1500, 9000), "EYL": (400, 4500), "EYR": (400, 4500)},
+        "nod": {"small": (9, 110), "big": (14, 140)},
+        "sway": 12,
+        "turn": 18,
+        "gaze": 18,
+        "pose_end": {"YAW": 90, "ROL": 98, "PIT": 36, "MOU": 150, "LID": 150,
+                     "EAL": 72, "EAR": 128},
+    },
+    "mischief": {
+        # God Rest Ye Merry Gentlemen: sneaking, then bold; ends with a sly grin
+        "base": {"YAW": 90, "ROL": 90, "PIT": 58, "MOU": 150, "LID": 126,
+                 "EYL": 90, "EYR": 90, "EAL": 128, "EAR": 72},
+        "motion": {"PIT": (380, 3500), "ROL": (260, 1800), "YAW": (200, 1200),
+                   "EAL": (750, 9000), "EAR": (750, 9000), "LID": (800, 8000),
+                   "MOU": (1500, 9000), "EYL": (450, 5000), "EYR": (450, 5000)},
+        "nod": {"small": (8, 110), "big": (13, 140)},
+        "sway": 13,
+        "turn": 22,
+        "gaze": 20,
+        "pose_end": {"YAW": 90, "ROL": 80, "PIT": 36, "MOU": 150, "LID": 140,
+                     "EAL": 72, "EAR": 128},
+    },
+    "party": {
+        # We Wish You a Merry Christmas: a waltzing elves' party
+        "base": {"YAW": 90, "ROL": 90, "PIT": 46, "MOU": 150, "LID": 150,
+                 "EYL": 90, "EYR": 90, "EAL": 104, "EAR": 96},
+        "motion": {"PIT": (400, 3800), "ROL": (280, 1800), "YAW": (220, 1300),
+                   "EAL": (800, 9000), "EAR": (800, 9000), "LID": (900, 9000),
+                   "MOU": (1500, 9000), "EYL": (400, 4500), "EYR": (400, 4500)},
+        "nod": {"small": (9, 110), "big": (14, 140)},
+        "sway": 12,
+        "turn": 20,
+        "gaze": 18,
+        "pose_end": {"YAW": 90, "ROL": 90, "PIT": 34, "MOU": 150, "LID": 155,
+                     "EAL": 70, "EAR": 130},
+    },
+    # ---- Snowman edition (choreography: dj/choreo_snow.py): soft and slow.
+    "lullaby": {
+        # Brahms' Lullaby: dozing off, asleep by the last chord
+        "base": {"YAW": 90, "ROL": 90, "PIT": 46, "MOU": 150, "LID": 150,
+                 "EYL": 90, "EYR": 90, "EAL": 104, "EAR": 96},
+        "motion": {"PIT": (60, 300), "ROL": (40, 220), "YAW": (35, 180),
+                   "EAL": (300, 2500), "EAR": (300, 2500), "LID": (120, 900),
+                   "MOU": (300, 2000), "EYL": (90, 600), "EYR": (90, 600)},
+        "nod": {"small": (5, 300)},
+        "sway": 8,
+        "turn": 12,
+        "gaze": 10,
+        "pose_end": {"YAW": 90, "ROL": 96, "PIT": 66, "MOU": 150, "LID": 102,
+                     "EAL": 136, "EAR": 64},
+    },
+    "stomp": {
+        # Good King Wenceslas: a heavy waddle through deep snow, snowballs
+        "base": {"YAW": 90, "ROL": 90, "PIT": 50, "MOU": 150, "LID": 146,
+                 "EYL": 90, "EYR": 90, "EAL": 104, "EAR": 96},
+        "motion": {"PIT": (260, 2200), "ROL": (160, 1100), "YAW": (140, 800),
+                   "EAL": (700, 8000), "EAR": (700, 8000), "LID": (800, 8000),
+                   "MOU": (1200, 8000), "EYL": (300, 3000), "EYR": (300, 3000)},
+        "nod": {"small": (8, 160), "big": (12, 200)},
+        "sway": 10,
+        "turn": 14,
+        "gaze": 14,
+        "pose_end": {"YAW": 90, "ROL": 90, "PIT": 40, "MOU": 150, "LID": 150,
+                     "EAL": 84, "EAR": 116},
+    },
+    "blizzard": {
+        # Shchedryk: swept around by the blizzard, then frozen solid
+        "base": {"YAW": 90, "ROL": 90, "PIT": 46, "MOU": 150, "LID": 146,
+                 "EYL": 90, "EYR": 90, "EAL": 100, "EAR": 100},
+        "motion": {"PIT": (260, 2200), "ROL": (200, 1500), "YAW": (220, 1300),
+                   "EAL": (800, 9000), "EAR": (800, 9000), "LID": (800, 8000),
+                   "MOU": (1200, 8000), "EYL": (350, 3500), "EYR": (350, 3500)},
+        "nod": {"small": (8, 160), "big": (12, 200)},
+        "sway": 12,
+        "turn": 24,
+        "gaze": 16,
+        "pose_end": {"YAW": 100, "ROL": 84, "PIT": 40, "MOU": 120, "LID": 152,
+                     "EAL": 76, "EAR": 124},
     },
 }
 
@@ -148,7 +302,7 @@ def _apply_motion(style):
 
 
 def start(name, now):
-    track = dance_data.TRACKS.get(name)
+    track = _track(name)
     style = STYLES.get(name)
     if track is None or style is None:
         print("[DANCE] unknown track:", name)
@@ -200,7 +354,16 @@ def _do_move(move, arg, now):
     held = _dance["held"]
     base = style["base"]
 
-    if move in ("nod", "bounce"):
+    if move == "to":
+        # (servo, angle) or (servo, angle, speed): move there and stay
+        servo_name, angle = arg[0], arg[1]
+        if len(arg) > 2:
+            servos[servo_name].max_speed = arg[2]
+        _hold(servo_name, angle)
+    elif move == "pulse":
+        # (servo, angle, hold_ms): go there, then back to the resting angle
+        _pulse(arg[0], arg[1], arg[2], now)
+    elif move in ("nod", "bounce"):
         depth, hold_ms = style["nod"].get(arg or "small", style["nod"].get("small", (7, 110)))
         if move == "bounce":
             depth, hold_ms = style["nod"]["small"]
