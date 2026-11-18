@@ -10,6 +10,11 @@
 #include "assets.h"
 #include "settings.h"
 #include "coglet_reminder.h"
+#include "coglet_settings.h"
+#include "sdkconfig.h"
+#if CONFIG_COGLET_RP2040_SYNC
+#include "coglet_rp2040_sync.h"
+#endif
 #include "coglet_sounds.h"
 
 #include <cstring>
@@ -30,6 +35,8 @@ namespace {
 constexpr bool kAutoAwakeOnBoot = true;
 constexpr int kAutoAwakeBootDelayTicks = 4;  // Keep the existing startup sound guard.
 constexpr int kAutoAwakePrepareSettleTicks = 2;  // Separate AFE allocation from UDP setup.
+constexpr int kAutoAwakeSyncWaitMaxS = 120;       // Longest wait for a servo board update.
+int auto_awake_sync_wait_s_ = 0;
 // After a physical wake word no boot sound is playing; still use the same
 // prepare -> settle -> channel order, with a short initial debounce stage.
 constexpr int kManualWakeInitialTicks = 1;
@@ -61,7 +68,8 @@ Application::Application() {
 #if CONFIG_USE_DEVICE_AEC && CONFIG_USE_SERVER_AEC
 #error "CONFIG_USE_DEVICE_AEC and CONFIG_USE_SERVER_AEC cannot be enabled at the same time"
 #elif CONFIG_USE_DEVICE_AEC
-    aec_mode_ = kAecOnDeviceSide;
+    // On/off per boot from the web flasher's Settings (else menuconfig).
+    aec_mode_ = CogletSettings::DeviceAec() ? kAecOnDeviceSide : kAecOff;
 #elif CONFIG_USE_SERVER_AEC
     aec_mode_ = kAecOnServerSide;
 #else
@@ -372,6 +380,12 @@ void Application::Start() {
 
     /* Setup the audio service */
     auto codec = board.GetAudioCodec();
+    if (aec_mode_ == kAecOnDeviceSide && !codec->input_reference()) {
+        // No speaker reference (allocation failed): realtime listening would
+        // hear Coglet's own voice, so fall back to the normal mode.
+        ESP_LOGW(TAG, "Device AEC unavailable on this boot: no speaker reference");
+        aec_mode_ = kAecOff;
+    }
     audio_service_.Initialize(codec);
     audio_service_.Start();
 
@@ -715,13 +729,20 @@ void Application::MainEventLoop() {
 #if CONFIG_COGLET_DANCE
             UpdateDance();
 #endif
-            // Manual wakes get the same AFE-before-UDP staging every time,
-            // not just the first wake after cold boot.
+            // Manual wakes keep the AFE-before-UDP order every time; the
+            // settle interval is only added when the wake allocates the AFE.
             AdvanceStaggeredWakeTick();
             if (auto_awake_boot_pending_ && device_state_ == kDeviceStateIdle &&
                 !auto_awake_sleep_latched_) {
                 if (auto_awake_boot_delay_ticks_ > 0) {
                     --auto_awake_boot_delay_ticks_;
+#if CONFIG_COGLET_RP2040_SYNC
+                } else if (CogletRp2040::SyncBusy() && ++auto_awake_sync_wait_s_ <= kAutoAwakeSyncWaitMaxS) {
+                    // The servo board is being updated: start talking afterwards.
+                    if (auto_awake_sync_wait_s_ == 1) {
+                        ESP_LOGI(AUTO_AWAKE_TAG, "BOOT_WAIT: servo board update in progress");
+                    }
+#endif
                 } else if (audio_service_.IsIdle()) {
                     if (!auto_awake_processor_prepared_) {
                         // AFE/model memory allocation can be large. Prepare it
@@ -901,7 +922,7 @@ std::string Application::RequestDance(const std::string& style) {
     if (dance_stage_ != DanceStage::None || dance_task_running_) {
         return "";
     }
-    static const char* const kStyles[] = {"mecha", "evil", "cat"};
+    const auto& kStyles = CogletEdition::kDanceStyles;   // this edition's built-in dances
     std::string resolved = style;
 #if CONFIG_COGLET_MUSIC
     dance_song_ = nullptr;
@@ -916,7 +937,7 @@ std::string Application::RequestDance(const std::string& style) {
     } else
 #endif
     if (CogletSounds::Dance(resolved).empty()) {
-        resolved = kStyles[esp_random() % 3];   // "random" or anything unknown
+        resolved = kStyles[esp_random() % 3];   // "random" or anything unknown (3 per edition)
     }
     dance_style_ = resolved;
     dance_stage_ = DanceStage::WaitAck;
@@ -1162,12 +1183,18 @@ void Application::AdvanceStaggeredWakeTick() {
     }
     if (wake_session_stage_ == WakeSessionStage::Prepare) {
         // Initialize AFE only if needed; repeated wakes must not reallocate it.
+        // The settle interval separates that (large) allocation from the UDP
+        // setup, so it is only needed when this wake actually allocates.
+        const bool allocate = !audio_service_.VoiceProcessingPrepared();
         audio_service_.PrepareVoiceProcessing();
         auto_awake_processor_prepared_ = true;
-        wake_session_stage_ = WakeSessionStage::Settle;
-        wake_session_delay_ticks_ = kAutoAwakePrepareSettleTicks;
-        ESP_LOGI(AUTO_AWAKE_TAG, "LOCAL_WAKE_PREPARED: settling before UDP");
-        return;
+        if (allocate) {
+            wake_session_stage_ = WakeSessionStage::Settle;
+            wake_session_delay_ticks_ = kAutoAwakePrepareSettleTicks;
+            ESP_LOGI(AUTO_AWAKE_TAG, "LOCAL_WAKE_PREPARED: settling before UDP");
+            return;
+        }
+        ESP_LOGI(AUTO_AWAKE_TAG, "LOCAL_WAKE_PREPARED: already allocated, no settling");
     }
     // Settle complete: open the UDP channel before sending either cached
     // wake audio or listen/detect; never burst dozens of packets at once.

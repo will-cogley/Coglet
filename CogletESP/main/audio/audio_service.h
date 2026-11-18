@@ -105,6 +105,8 @@ public:
     void EnableVoiceProcessing(bool enable);
     // Initialize the processor without enabling its capture/encode pipeline.
     void PrepareVoiceProcessing();
+    // True once the voice processor (AFE) has been allocated; it is never freed.
+    bool VoiceProcessingPrepared() const { return audio_processor_initialized_; }
     void EnableAudioTesting(bool enable);
     void EnableDeviceAec(bool enable);
 
