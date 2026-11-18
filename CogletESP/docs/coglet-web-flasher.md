@@ -248,7 +248,11 @@ most 2 minutes), so a transfer never runs during the first conversation:
   removed at the next boot.
 * A full transfer takes roughly half a minute at the link's 115200 baud; a
   usual update (a few changed files) takes a few seconds. The servos relax
-  during it, then the RP2040 restarts and the ESP re-sends the current state.
+  during it, then the RP2040 restarts. After any transfer, whether it worked
+  or not, the ESP asks for the bundle id until the RP2040's program answers
+  again (at most 30 s; starting `app.py` takes a few seconds), then re-sends
+  the current state. Auto-Awake waits for this too, so no state of the first
+  conversation is lost while the RP2040 restarts.
 
 The RP2040 is organised so that a broken update can't lock it out:
 
@@ -256,7 +260,7 @@ The RP2040 is organised so that a broken update can't lock it out:
 |---|---|
 | `main.py` | Tiny launcher. Finishes an interrupted update, runs `app.py`, and if `app.py` fails to start, stays in recovery mode so the ESP can send a working version. |
 | `coglet_updater.py` | The receiver. |
-| `app.py` | Coglet's program (formerly `main.py`). |
+| `app.py` | Coglet's program (formerly `main.py`). Once running, it never drops into recovery mode: a garbled line on the UART (for example while the ESP is being flashed) is ignored, and an error in the main loop is printed (`[ERROR] main loop error #n`, at most every 5 s) while Coglet keeps going. |
 | `coglet_bundle.txt` | Id of the installed bundle. |
 
 ESP log lines (tag `CogletRp2040`):

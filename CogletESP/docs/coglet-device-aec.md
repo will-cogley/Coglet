@@ -38,6 +38,8 @@ CogletAutoAwake: BOOT_LISTENING: mode=realtime
 
 ### 2. 每秒一行诊断
 
+Since this line is off by default, turn on menuconfig → "Coglet: log microphone levels every second" (`CONFIG_COGLET_MIC_DIAG_LOG`) first.
+
 ```
 [MIC] mode=aec-ref ... | [AEC-REF] refPeak=... offset=..us missing=.. late=.. micOvr=.. refOvr=.. resync=a/b torn=..
 ```

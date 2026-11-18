@@ -502,160 +502,162 @@ _enable_servo_outputs("boot", POWER_UP_GAP_BOOT_MS)
 _refresh_calibration_home()
 
 
-while True:
+# A runtime error must not freeze Coglet: report it and keep going. (Errors
+# while starting up still reach main.py, which waits for a working program
+# from the ESP.) Reported at most once per LOOP_ERROR_REPORT_MS.
+LOOP_ERROR_REPORT_MS = 5000
+loop_errors = 0
+loop_error_reported_at = None
+
+
+def _report_loop_error(exc):
+    global loop_errors
+    global loop_error_reported_at
+    loop_errors += 1
     now = time.ticks_ms()
-    dt = time.ticks_diff(now, last_time) / 1000.0
-    last_time = now
+    if (loop_error_reported_at is not None and
+            time.ticks_diff(now, loop_error_reported_at) < LOOP_ERROR_REPORT_MS):
+        return
+    loop_error_reported_at = now
+    print("[ERROR] main loop error #{} (Coglet keeps running):".format(loop_errors))
+    sys.print_exception(exc)
 
-    if ESP.any():
-        rx_buffer += ESP.read()   # bytes + bytes = OK
-        while b"\n" in rx_buffer:
-            line, rx_buffer = rx_buffer.split(b"\n", 1)
-            rcvstate = line.decode().strip()
 
-            # ESP -> RP2040 file updates (see coglet_updater.py).
-            if rcvstate.startswith("upd:"):
-                coglet_updater.handle_line(
-                    rcvstate, ESP, before_session=_park_for_update)
-                continue
+while True:
+    try:
+        now = time.ticks_ms()
+        dt = time.ticks_diff(now, last_time) / 1000.0
+        last_time = now
 
-            print("RX:", rcvstate)
-
-            # Explicit MCP one-shot/temporary actions are a separate UART
-            # namespace from normal XiaoZhi expression states.  The RP2040
-            # owns the requested action for exactly 2 seconds.
-            # Built-in music dance (ESP plays the matching track at the
-            # same moment).  "dance:stop" ends it early.
-            if rcvstate.startswith("dance:"):
-                dance_name = rcvstate[6:].strip().lower()
-                if dance_name == "stop":
-                    music.stop(now, "ESP stop")
-                elif mode.value() != 0:
-                    _enable_servo_outputs("dance {}".format(dance_name))
-                    animation._finish_mcp_action(now, "dance")
-                    animation.update_blink(now, animation.current_state, enabled=False)
-                    music.start(dance_name, now)
-                else:
-                    print("[DANCE] ignored during Calibration Mode")
-                continue
-
-            # Custom song from the Music folder: beats are streamed live.
-            if rcvstate.startswith("gb:"):
-                music.groove_beat(rcvstate[3:].strip(), now)
-                continue
-            if rcvstate.startswith("groove:"):
-                parts = rcvstate.strip().split(":")
-                if parts[1:2] == ["end"]:
-                    music.groove_end(now)
-                elif mode.value() != 0:
-                    _enable_servo_outputs("groove {}".format(parts[1] if len(parts) > 1 else "?"))
-                    animation._finish_mcp_action(now, "groove")
-                    animation.update_blink(now, animation.current_state, enabled=False)
-                    bpm = parts[2] if len(parts) > 2 else "?"
-                    music.start_groove(parts[1] if len(parts) > 1 else "calm", bpm, now)
-                else:
-                    print("[DANCE] ignored during Calibration Mode")
-                continue
-
-            if rcvstate.startswith("action:"):
-                action_name = rcvstate[7:].strip()
-                if music.active():
-                    print("[DANCE] MCP action ignored while dancing:", action_name)
+        if ESP.any():
+            rx_buffer += ESP.read()   # bytes + bytes = OK
+            while b"\n" in rx_buffer:
+                line, rx_buffer = rx_buffer.split(b"\n", 1)
+                # A garbled byte on the link (the ESP being reset or flashed)
+                # must not stop Coglet: drop that line.
+                try:
+                    rcvstate = line.decode().strip()
+                except UnicodeError:
+                    print("[UART] dropped a garbled line from the ESP")
                     continue
-                _enable_servo_outputs("MCP action {}".format(action_name))
-                animation.start_mcp_action(action_name, now)
-                continue
 
-            # Any real non-idle XiaoZhi state wakes the servos before its
-            # normal state/action logic runs. "idle" deliberately stays
-            # enabled until pose_sleep has settled and the release delay ends.
-            if rcvstate != "idle" and rcvstate in animation.state_map:
-                _enable_servo_outputs("state {}".format(rcvstate))
+                # ESP -> RP2040 file updates (see coglet_updater.py).
+                if rcvstate.startswith("upd:"):
+                    coglet_updater.handle_line(
+                        rcvstate, ESP, before_session=_park_for_update)
+                    continue
 
-            # Speech activity and expression are two separate dimensions.
-            # "speaking" starts the mouth animation.
-            # happy/sad only change expression and leave speech_active untouched.
-            # Device states such as neutral/listening/thinking stop speech.
-            if rcvstate == "speaking":
-                if not speech_active:
-                    print("[MOUTH] speech flag: OFF -> ON")
-                speech_active = True
-            elif rcvstate in SPEECH_STOP_SIGNALS:
-                if speech_active:
-                    print("[MOUTH] speech flag: ON -> OFF ({})".format(rcvstate))
-                speech_active = False
+                print("RX:", rcvstate)
 
-            if rcvstate in animation.state_map:
-                # XiaoZhi may report the same state repeatedly during one
-                # long TTS response. Do not re-enter the same state, because
-                # that would reset the Speaking timers again and again.
-                if rcvstate != animation.current_state:
-                    print(
-                        "state change:",
-                        animation.current_state,
-                        "->",
-                        rcvstate,
-                    )
-                    # Restore the motion limits declared in animation.servos
-                    # before entering a different normal state. This prevents
-                    # temporary tuning from excited/silly/shock/etc. leaking
-                    # into the next expression.
-                    # A running dance owns the motion limits; music.stop()
-                    # resets them and re-enters the latest state later.
-                    if not music.active():
-                        animation.reset_servo_motion_defaults()
+                # Explicit MCP one-shot/temporary actions are a separate UART
+                # namespace from normal XiaoZhi expression states.  The RP2040
+                # owns the requested action for exactly 2 seconds.
+                # Built-in music dance (ESP plays the matching track at the
+                # same moment).  "dance:stop" ends it early.
+                if rcvstate.startswith("dance:"):
+                    dance_name = rcvstate[6:].strip().lower()
+                    if dance_name == "stop":
+                        music.stop(now, "ESP stop")
+                    elif mode.value() != 0:
+                        _enable_servo_outputs("dance {}".format(dance_name))
+                        animation._finish_mcp_action(now, "dance")
+                        animation.update_blink(now, animation.current_state, enabled=False)
+                        music.start(dance_name, now)
+                    else:
+                        print("[DANCE] ignored during Calibration Mode")
+                    continue
 
-                    animation.current_state = rcvstate
-                    animation.new_state_flag = True
-                else:
-                    print("same state ignored:", rcvstate)
+                # Custom song from the Music folder: beats are streamed live.
+                if rcvstate.startswith("gb:"):
+                    music.groove_beat(rcvstate[3:].strip(), now)
+                    continue
+                if rcvstate.startswith("groove:"):
+                    parts = rcvstate.strip().split(":")
+                    if parts[1:2] == ["end"]:
+                        music.groove_end(now)
+                    elif mode.value() != 0:
+                        _enable_servo_outputs("groove {}".format(parts[1] if len(parts) > 1 else "?"))
+                        animation._finish_mcp_action(now, "groove")
+                        animation.update_blink(now, animation.current_state, enabled=False)
+                        bpm = parts[2] if len(parts) > 2 else "?"
+                        music.start_groove(parts[1] if len(parts) > 1 else "calm", bpm, now)
+                    else:
+                        print("[DANCE] ignored during Calibration Mode")
+                    continue
 
-    # Calibration retains absolute priority over every servo command.
-    # Wake PWM before Calibration Mode issues any servo command.
-    if mode.value() == 0:
-        _enable_servo_outputs("Calibration Mode", POWER_UP_GAP_BOOT_MS)
+                if rcvstate.startswith("action:"):
+                    action_name = rcvstate[7:].strip()
+                    if music.active():
+                        print("[DANCE] MCP action ignored while dancing:", action_name)
+                        continue
+                    _enable_servo_outputs("MCP action {}".format(action_name))
+                    animation.start_mcp_action(action_name, now)
+                    continue
 
-    # --- START TEMPORARY ANIMATION TEST OVERRIDE ---
-    calibration_owns_servos = _update_calibration_wiggle(now)
-    mcp_owns_servos = False
-    dance_owns_servos = False
+                # Any real non-idle XiaoZhi state wakes the servos before its
+                # normal state/action logic runs. "idle" deliberately stays
+                # enabled until pose_sleep has settled and the release delay ends.
+                if rcvstate != "idle" and rcvstate in animation.state_map:
+                    _enable_servo_outputs("state {}".format(rcvstate))
 
-    # Calibration Mode always wins over a dance.
-    if calibration_owns_servos and music.active():
-        music.stop(now, "Calibration Mode")
+                # Speech activity and expression are two separate dimensions.
+                # "speaking" starts the mouth animation.
+                # happy/sad only change expression and leave speech_active untouched.
+                # Device states such as neutral/listening/thinking stop speech.
+                if rcvstate == "speaking":
+                    if not speech_active:
+                        print("[MOUTH] speech flag: OFF -> ON")
+                    speech_active = True
+                elif rcvstate in SPEECH_STOP_SIGNALS:
+                    if speech_active:
+                        print("[MOUTH] speech flag: ON -> OFF ({})".format(rcvstate))
+                    speech_active = False
 
-    if calibration_owns_servos:
-        if time.ticks_diff(now, last_toggle) >= 500:
-            calibrate_bool = not calibrate_bool   # flip the boolean
-            last_toggle = now
-        
-        # Calibration also pauses new Grove Vision work.
-        animation.update_blink(
-            now,
-            animation.current_state,
-            enabled=False,
-        )
-        eye_follower.update(
-            now,
-            animation.current_state,
-            enabled=False,
-        )
+                if rcvstate in animation.state_map:
+                    # XiaoZhi may report the same state repeatedly during one
+                    # long TTS response. Do not re-enter the same state, because
+                    # that would reset the Speaking timers again and again.
+                    if rcvstate != animation.current_state:
+                        print(
+                            "state change:",
+                            animation.current_state,
+                            "->",
+                            rcvstate,
+                        )
+                        # Restore the motion limits declared in animation.servos
+                        # before entering a different normal state. This prevents
+                        # temporary tuning from excited/silly/shock/etc. leaking
+                        # into the next expression.
+                        # A running dance owns the motion limits; music.stop()
+                        # resets them and re-enters the latest state later.
+                        if not music.active():
+                            animation.reset_servo_motion_defaults()
 
-    else:
-        calibrate_bool = False
+                        animation.current_state = rcvstate
+                        animation.new_state_flag = True
+                    else:
+                        print("same state ignored:", rcvstate)
 
-        # MCP actions have priority over normal State / Speaking / random Blink
-        # / Vision for a fixed 2-second window.  update_mcp_action() returns
-        # False on the exact loop where that window expires, so the newest
-        # normal state resumes immediately without an extra dead frame.
-        # Dance > MCP action > State / Speaking / Blink / Vision.
-        dance_owns_servos = music.update(now)
-        if not dance_owns_servos:
-            mcp_owns_servos = animation.update_mcp_action(now)
+        # Calibration retains absolute priority over every servo command.
+        # Wake PWM before Calibration Mode issues any servo command.
+        if mode.value() == 0:
+            _enable_servo_outputs("Calibration Mode", POWER_UP_GAP_BOOT_MS)
 
-        if dance_owns_servos or mcp_owns_servos:
-            # Keep background systems alive logically but prevent any of them
-            # from issuing competing servo commands during MCP ownership.
+        # --- START TEMPORARY ANIMATION TEST OVERRIDE ---
+        calibration_owns_servos = _update_calibration_wiggle(now)
+        mcp_owns_servos = False
+        dance_owns_servos = False
+
+        # Calibration Mode always wins over a dance.
+        if calibration_owns_servos and music.active():
+            music.stop(now, "Calibration Mode")
+
+        if calibration_owns_servos:
+            if time.ticks_diff(now, last_toggle) >= 500:
+                calibrate_bool = not calibrate_bool   # flip the boolean
+                last_toggle = now
+            
+            # Calibration also pauses new Grove Vision work.
             animation.update_blink(
                 now,
                 animation.current_state,
@@ -668,54 +670,80 @@ while True:
             )
 
         else:
-            # GP21 affects ONLY Grove Vision / face tracking.
-            facetrack_enabled = _update_facetrack_toggle()
+            calibrate_bool = False
 
-            # XiaoZhi animations keep running whether Facetrack is ON or OFF.
-            animation.apply_state(animation.current_state)
+            # MCP actions have priority over normal State / Speaking / random Blink
+            # / Vision for a fixed 2-second window.  update_mcp_action() returns
+            # False on the exact loop where that window expires, so the newest
+            # normal state resumes immediately without an extra dead frame.
+            # Dance > MCP action > State / Speaking / Blink / Vision.
+            dance_owns_servos = music.update(now)
+            if not dance_owns_servos:
+                mcp_owns_servos = animation.update_mcp_action(now)
 
-            animation.update_blink(
-                now,
-                animation.current_state,
-                enabled=True,
-            )
+            if dance_owns_servos or mcp_owns_servos:
+                # Keep background systems alive logically but prevent any of them
+                # from issuing competing servo commands during MCP ownership.
+                animation.update_blink(
+                    now,
+                    animation.current_state,
+                    enabled=False,
+                )
+                eye_follower.update(
+                    now,
+                    animation.current_state,
+                    enabled=False,
+                )
 
-            # When GP21 is OFF, vision.py pauses new Vision AI requests and
-            # performs no visual-follow servo writes. In standby the eyelid is
-            # closed and nothing is tracked, so Grove inference is paused too
-            # (AT+BREAK) and resumes automatically on wake.
-            eye_follower.update(
-                now,
-                animation.current_state,
-                enabled=facetrack_enabled and animation.current_state != "idle",
-            )
+            else:
+                # GP21 affects ONLY Grove Vision / face tracking.
+                facetrack_enabled = _update_facetrack_toggle()
 
-            # MOU is independent from current emotion.  Run this after all
-            # expression/vision updates so speech has final ownership of the mouth.
-            animation.update_speaking_mouth(now, speech_active)
-        
-    front_LED.value(calibrate_bool)
+                # XiaoZhi animations keep running whether Facetrack is ON or OFF.
+                animation.apply_state(animation.current_state)
 
-    # During wiggle, set_immediate() writes the PCA command directly.
-    # Servo.update() remains safe because pos/target/vel are synchronized
-    # by set_immediate(). During non-wiggle calibration it moves toward home.
-    for s in servos.values():
-        s.update(dt)
+                animation.update_blink(
+                    now,
+                    animation.current_state,
+                    enabled=True,
+                )
 
-    # Switch on the next servo(s) of a staggered power-up, if one is running.
-    if power_up_queue:
-        _update_power_up(now)
+                # When GP21 is OFF, vision.py pauses new Vision AI requests and
+                # performs no visual-follow servo writes. In standby the eyelid is
+                # closed and nothing is tracked, so Grove inference is paused too
+                # (AT+BREAK) and resumes automatically on wake.
+                eye_follower.update(
+                    now,
+                    animation.current_state,
+                    enabled=facetrack_enabled and animation.current_state != "idle",
+                )
 
-    # Run this only after Servo.update(), so "settled" reflects the real
-    # end-of-loop motion state. It changes only PCA9685 nOE and therefore
-    # leaves all existing animation/vision/calibration logic intact.
-    _update_sleep_torque_release(
-        now,
-        calibration_owns_servos,
-        mcp_owns_servos or dance_owns_servos,
-    )
+                # MOU is independent from current emotion.  Run this after all
+                # expression/vision updates so speech has final ownership of the mouth.
+                animation.update_speaking_mouth(now, speech_active)
+            
+        front_LED.value(calibrate_bool)
 
-    time.sleep_ms(1)
+        # During wiggle, set_immediate() writes the PCA command directly.
+        # Servo.update() remains safe because pos/target/vel are synchronized
+        # by set_immediate(). During non-wiggle calibration it moves toward home.
+        for s in servos.values():
+            s.update(dt)
 
+        # Switch on the next servo(s) of a staggered power-up, if one is running.
+        if power_up_queue:
+            _update_power_up(now)
 
+        # Run this only after Servo.update(), so "settled" reflects the real
+        # end-of-loop motion state. It changes only PCA9685 nOE and therefore
+        # leaves all existing animation/vision/calibration logic intact.
+        _update_sleep_torque_release(
+            now,
+            calibration_owns_servos,
+            mcp_owns_servos or dance_owns_servos,
+        )
 
+        time.sleep_ms(1)
+    except Exception as exc:
+        _report_loop_error(exc)
+        time.sleep_ms(1)

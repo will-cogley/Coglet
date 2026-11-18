@@ -52,7 +52,14 @@ enum class SyncResult {
 const char* ToString(SyncResult result);
 
 // Runs the whole check / transfer. Blocking; call from its own task.
-SyncResult Sync(Link& link, const char* bundle_id, const BundleFile* files, size_t file_count);
+// *restarts is set when a transfer was started: the RP2040 then restarts
+// whether it succeeded or not.
+SyncResult Sync(Link& link, const char* bundle_id, const BundleFile* files, size_t file_count,
+                bool* restarts = nullptr);
+
+// After a restart: ask for the bundle id until the RP2040's main loop answers
+// (it only answers once app.py runs). Returns the id, or "" on timeout.
+std::string WaitForRestart(Link& link, int max_ms);
 
 #ifdef ESP_PLATFORM
 // Starts the background task that syncs the RP2040 a few seconds after boot.

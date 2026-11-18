@@ -50,6 +50,10 @@ public:
         const auto state = Application::GetInstance().GetDeviceState();
         const bool listening = (state == kDeviceStateListening);
 
+        // Also called on every voice activity change while listening: only
+        // act (and log) when the LED actually changes.
+        if (listening == on_) return;
+        on_ = listening;
         gpio_set_level(gpio_, listening ? 1 : 0);
 
         ESP_LOGI("ListeningLed",
@@ -61,6 +65,7 @@ public:
 
 private:
     gpio_num_t gpio_;
+    bool on_ = false;           // matches the power-up level set above
 };
 
 // Camera-board logic transplanted from the known-good CogletESP V1.1 board.

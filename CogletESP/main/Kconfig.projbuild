@@ -709,6 +709,16 @@ config COGLET_AEC_DEFAULT_OFF
         is exactly the one of a build without it. The published firmware
         uses this; leave it off to have AEC on by default.
 
+config COGLET_MIC_DIAG_LOG
+    bool "Coglet: log microphone levels every second"
+    default n
+    depends on BOARD_TYPE_BREAD_COMPACT_WIFI_CAM
+    help
+        Prints one "[MIC] ..." line per second (raw peak, DC, AC and PCM
+        levels, clipping; with device AEC also the "[AEC-REF]" reference
+        alignment). Only useful when checking the microphone wiring or AEC
+        timing; off by default so the log stays readable.
+
 config USE_SERVER_AEC
     bool "Enable Server-Side AEC (Unstable)"
     default n

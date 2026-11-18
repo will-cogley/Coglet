@@ -112,7 +112,19 @@ const char* ToString(SyncResult result) {
     return "?";
 }
 
-SyncResult Sync(Link& link, const char* bundle_id, const BundleFile* files, size_t file_count) {
+std::string WaitForRestart(Link& link, int max_ms) {
+    // Lines sent while the RP2040 resets or compiles app.py are lost, so poll.
+    constexpr int kPollMs = 1000;
+    for (int waited = 0; waited < max_ms; waited += kPollMs) {
+        std::string reply;
+        if (Exchange(link, "upd:ver?", "upd:ver:", kPollMs, 0, &reply)) return reply.substr(8);
+    }
+    return "";
+}
+
+SyncResult Sync(Link& link, const char* bundle_id, const BundleFile* files, size_t file_count,
+                bool* restarts) {
+    if (restarts) *restarts = false;
     std::string reply;
     bool answered = false;
     for (int i = 0; i < kVersionAttempts && !answered; ++i) {
@@ -153,8 +165,11 @@ SyncResult Sync(Link& link, const char* bundle_id, const BundleFile* files, size
     if (!Exchange(link, std::string("upd:begin:") + bundle_id + ":" + std::to_string(todo.size()),
                   "upd:ready", kReadyTimeoutMs, 1)) {
         link.Log("RP2040 did not start the update");
+        // It may still have started a session (only the reply was lost).
+        if (restarts) *restarts = true;
         return SyncResult::Failed;
     }
+    if (restarts) *restarts = true;
     for (size_t i : todo) {
         if (!SendFile(link, files[i])) {
             link.SendLine("upd:abort");
@@ -189,6 +204,8 @@ namespace {
 
 constexpr const char* TAG = "CogletRp2040";
 constexpr int kBootDelayMs = 5000;            // let the RP2040 finish booting
+// app.py is compiled on the RP2040 at every start: give it plenty of time.
+constexpr int kRestartWaitMs = 30000;
 
 class UartLink : public Link {
 public:
@@ -240,7 +257,8 @@ void SyncTask(void*) {
     uart_flush_input(UART_PORT_NUM);
     UartLink link;
     const int64_t start = esp_timer_get_time();
-    const SyncResult result = Sync(link, kBundleId, kBundleFiles, kBundleFileCount);
+    bool restarts = false;
+    const SyncResult result = Sync(link, kBundleId, kBundleFiles, kBundleFileCount, &restarts);
     const int seconds = static_cast<int>((esp_timer_get_time() - start) / 1000000);
     if (result == SyncResult::NoUpdater) {
         ESP_LOGW(TAG, "RP2040 did not answer: it needs the one-time setup from the web flasher "
@@ -251,9 +269,18 @@ void SyncTask(void*) {
     } else {
         ESP_LOGI(TAG, "RP2040 %s (bundle %s, %d s)", ToString(result), kBundleId, seconds);
     }
-    if (result == SyncResult::Updated) {
-        // The RP2040 restarts with the new files; tell it the current state.
-        vTaskDelay(pdMS_TO_TICKS(4000));
+    if (restarts) {
+        // The RP2040 restarts after a transfer, whether it worked or not.
+        // Anything sent before its main loop runs is lost, so wait until it
+        // answers again, then tell it the current state. Boot Auto-Awake keeps
+        // waiting meanwhile (SyncBusy), so the session's states are not lost.
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        const std::string now_running = WaitForRestart(link, kRestartWaitMs);
+        if (now_running.empty()) {
+            ESP_LOGW(TAG, "RP2040 did not answer within %d s after its restart", kRestartWaitMs / 1000);
+        } else {
+            ESP_LOGI(TAG, "RP2040 running again (bundle %s)", now_running.c_str());
+        }
         auto& app = Application::GetInstance();
         app.Schedule([&app]() { app.ResendStateToRp2040(); });
     }

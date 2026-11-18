@@ -187,7 +187,12 @@ class LineReader:
         while True:
             while b"\n" in self.buf:
                 line, self.buf = self.buf.split(b"\n", 1)
-                text = line.decode("utf-8", "ignore").strip()
+                # MicroPython may raise on invalid UTF-8 even with "ignore":
+                # a garbled line is simply dropped (the ESP resends on timeout).
+                try:
+                    text = line.decode("utf-8", "ignore").strip()
+                except UnicodeError:
+                    continue
                 if text.startswith("upd:"):
                     return text
             if _ticks_diff(_ticks_ms(), start) > timeout_ms:

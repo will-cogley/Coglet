@@ -408,7 +408,8 @@ int NoAudioCodec::Read(int16_t* dest, int samples) {
         }
     }
 
-    // One diagnostic line per second.
+#if CONFIG_COGLET_MIC_DIAG_LOG
+    // One diagnostic line per second (menuconfig: log microphone levels).
     static int64_t last_log_us = 0;
     const int64_t now_us = esp_timer_get_time();
     if (now_us - last_log_us >= 1000000) {
@@ -438,6 +439,11 @@ int NoAudioCodec::Read(int16_t* dest, int samples) {
             output_samples
         );
     }
+#else
+    // Levels are only collected for the diagnostic line.
+    (void)raw_left_peak; (void)raw_right_peak; (void)ac_abs_sum; (void)ac_peak;
+    (void)pcm_abs_sum; (void)pcm_peak; (void)clipped_samples;
+#endif
 
     return output_samples;
 }
@@ -796,7 +802,9 @@ int NoAudioCodecSimplex::ReadWithSoftwareReference(int16_t* dest, int samples) {
         dest[i * 2 + 1] = ref[i];
     }
 
-    // One diagnostic line per second (mic levels + reference alignment).
+#if CONFIG_COGLET_MIC_DIAG_LOG
+    // One diagnostic line per second (mic levels + reference alignment;
+    // menuconfig: log microphone levels).
     static int64_t last_log_us = 0;
     const int64_t now_us = esp_timer_get_time();
     if (now_us - last_log_us >= 1000000) {
@@ -822,5 +830,8 @@ int NoAudioCodecSimplex::ReadWithSoftwareReference(int16_t* dest, int samples) {
                  static_cast<unsigned>(aec.ref_resyncs),
                  static_cast<unsigned>(aec.mic_torn_blocks));
     }
+#else
+    (void)st;
+#endif
     return samples;
 }
