@@ -113,6 +113,9 @@ private:
     enum class WakeSessionStage : uint8_t { None, Prepare, Settle, Upload };
     WakeSessionStage wake_session_stage_ = WakeSessionStage::None;
     int wake_session_delay_ticks_ = 0;
+    // Short fixed pause after a wake (instead of "until the next clock tick").
+    esp_timer_handle_t wake_debounce_timer_ = nullptr;
+    bool wake_debounce_pending_ = false;
     bool wake_session_send_data_ = false;
     bool wake_session_popup_ = false;
     ListeningMode wake_session_mode_ = kListeningModeAutoStop;

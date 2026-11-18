@@ -38,8 +38,10 @@ constexpr int kAutoAwakePrepareSettleTicks = 2;  // Separate AFE allocation from
 constexpr int kAutoAwakeSyncWaitMaxS = 120;       // Longest wait for a servo board update.
 int auto_awake_sync_wait_s_ = 0;
 // After a physical wake word no boot sound is playing; still use the same
-// prepare -> settle -> channel order, with a short initial debounce stage.
-constexpr int kManualWakeInitialTicks = 1;
+// prepare -> (settle) -> channel order, after a short fixed debounce.
+// A fixed 250 ms (about the time the wake word audio takes to encode) instead
+// of waiting for the next 1 s clock tick (0..1 s).
+constexpr int kWakeDebounceMs = 250;
 constexpr int kWakeAudioBurstLimit = 2;
 constexpr int kWakeAudioPaceMs = 65;  // Opus frame is 60 ms; avoid flooding a new UDP socket.
 constexpr int kAudioSendBackoffMs[] = {120, 240, 400};  // Bounded, no task sleeps.
@@ -87,12 +89,31 @@ Application::Application() {
         .skip_unhandled_events = true
     };
     esp_timer_create(&clock_timer_args, &clock_timer_handle_);
+
+    esp_timer_create_args_t debounce_args = {
+        .callback = [](void* arg) {
+            Application* app = (Application*)arg;
+            app->Schedule([app]() {
+                app->wake_debounce_pending_ = false;
+                app->AdvanceStaggeredWakeTick();
+            });
+        },
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "wake_debounce",
+        .skip_unhandled_events = true
+    };
+    esp_timer_create(&debounce_args, &wake_debounce_timer_);
 }
 
 Application::~Application() {
     if (clock_timer_handle_ != nullptr) {
         esp_timer_stop(clock_timer_handle_);
         esp_timer_delete(clock_timer_handle_);
+    }
+    if (wake_debounce_timer_ != nullptr) {
+        esp_timer_stop(wake_debounce_timer_);
+        esp_timer_delete(wake_debounce_timer_);
     }
     vEventGroupDelete(event_group_);
 }
@@ -801,6 +822,8 @@ bool Application::StartAutoAwakeSession(const char* reason) {
 void Application::CancelStaggeredWake() {
     wake_session_stage_ = WakeSessionStage::None;
     wake_session_delay_ticks_ = 0;
+    if (wake_debounce_timer_) esp_timer_stop(wake_debounce_timer_);
+    wake_debounce_pending_ = false;
     wake_session_packets_.clear();
     wake_session_word_.clear();
     wake_session_send_data_ = false;
@@ -843,7 +866,15 @@ void Application::BeginStaggeredWake(const std::string& word, bool send_data,
     if (send_data) audio_service_.EncodeWakeWord();
     audio_service_.EnableWakeWordDetection(false); // Suppress duplicate triggers.
     wake_session_stage_ = WakeSessionStage::Prepare;
-    wake_session_delay_ticks_ = kManualWakeInitialTicks;
+    wake_session_delay_ticks_ = 0;
+    wake_debounce_pending_ = true;
+    if (wake_debounce_timer_) {
+        esp_timer_stop(wake_debounce_timer_);
+        esp_timer_start_once(wake_debounce_timer_, kWakeDebounceMs * 1000);
+    } else {
+        wake_session_delay_ticks_ = 1;      // no timer: fall back to the clock tick
+        wake_debounce_pending_ = false;
+    }
     SetDeviceState(kDeviceStateConnecting);
     ESP_LOGI(AUTO_AWAKE_TAG, "LOCAL_WAKE_STAGE: prepare word=%s", word.c_str());
 }
@@ -1177,6 +1208,7 @@ void Application::AdvanceStaggeredWakeTick() {
         CancelStaggeredWake();
         return;
     }
+    if (wake_debounce_pending_) return;        // the debounce timer advances it
     if (wake_session_delay_ticks_ > 0) {
         --wake_session_delay_ticks_;
         return;
