@@ -805,3 +805,123 @@ export function parseSettings(sector) {
   }
   return out;
 }
+
+// ------------------------------------------------------------ installed firmware
+// Read back from Coglet's flash which firmware it runs: the partition table
+// (0x8000), otadata (which app slot boots) and the start of that app image,
+// where ESP-IDF keeps esp_app_desc_t (version) and Coglet keeps its own
+// description (edition, build; main/coglet_app_desc.h).
+export const PARTITION_TABLE = 0x8000;
+export const PARTITION_TABLE_SIZE = 0xc00;
+export const APP_HEAD_SIZE = 1024;
+
+// [{name, type, subtype, offset, size}]
+export function parsePartitions(table) {
+  const out = [];
+  const dv = new DataView(table.buffer, table.byteOffset, table.byteLength);
+  for (let i = 0; i + 32 <= table.length; i += 32) {
+    if (dv.getUint16(i, true) !== 0x50aa) break;
+    let name = "";
+    for (let k = 0; k < 16 && table[i + 12 + k]; k++) name += String.fromCharCode(table[i + 12 + k]);
+    out.push({ name, type: table[i + 2], subtype: table[i + 3],
+               offset: dv.getUint32(i + 4, true), size: dv.getUint32(i + 8, true) });
+  }
+  return out;
+}
+
+// The app partitions in boot order: factory (if any), ota_0, ota_1, ...
+export function appSlots(parts) {
+  return parts.filter((p) => p.type === 0 && (p.subtype === 0 || (p.subtype >= 0x10 && p.subtype < 0x20)))
+              .sort((a, b) => a.subtype - b.subtype);
+}
+
+// Which OTA slot the bootloader picks from otadata (two 32-byte entries, at
+// 0 and 0x1000): the valid entry with the highest sequence number; slot
+// (seq - 1) % count. null when otadata is empty (then the first app boots).
+export function otaSlotFromData(otadata, otaCount) {
+  if (!otaCount) return null;
+  let best = null;
+  for (const at of [0, 0x1000]) {
+    if (otadata.length < at + 32) continue;
+    const e = otadata.subarray(at, at + 32);
+    const dv = new DataView(e.buffer, e.byteOffset, 32);
+    const seq = dv.getUint32(0, true);
+    const state = dv.getUint32(24, true);
+    if (seq === 0xffffffff || seq === 0) continue;
+    if (dv.getUint32(28, true) !== crc32(e.subarray(0, 4), 0xffffffff)) continue;
+    if (state === 3 || state === 4) continue;           // ESP_OTA_IMG_INVALID / ABORTED
+    if (best === null || seq > best) best = seq;
+  }
+  return best === null ? null : (best - 1) % otaCount;
+}
+
+function cString(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length && bytes[i]; i++) s += String.fromCharCode(bytes[i]);
+  return s;
+}
+
+// From the first APP_HEAD_SIZE bytes of an app slot:
+// {version, project, date, time, coglet, edition, commit} or null (no app).
+export function parseAppHead(head) {
+  if (head.length < 288 || head[0] !== 0xe9) return null;
+  const dv = new DataView(head.buffer, head.byteOffset, head.byteLength);
+  if (dv.getUint32(32, true) !== 0xabcd5432) return null;
+  const app = { version: cString(head.subarray(48, 80)), project: cString(head.subarray(80, 112)),
+                time: cString(head.subarray(112, 128)), date: cString(head.subarray(128, 144)),
+                coglet: false, edition: "", commit: "" };
+  const tag = [0x4c, 0x47, 0x4f, 0x43, 0x43, 0x4f, 0x47, 0x4c, 0x45, 0x54, 0];   // "LGOCCOGLET\0"
+  for (let i = 32; i + 64 <= head.length; i += 4) {
+    let hit = true;
+    for (let k = 0; k < tag.length && hit; k++) hit = head[i + k] === tag[k];
+    if (!hit) continue;
+    app.coglet = true;
+    app.edition = cString(head.subarray(i + 16, i + 32));
+    app.commit = cString(head.subarray(i + 32, i + 48));
+    break;
+  }
+  return app;
+}
+
+// -1 / 0 / 1 like the firmware's OTA check (numbers per dot), and a
+// "-suffix" (beta) comes before the same version without one.
+export function compareVersions(a, b) {
+  const split = (v) => {
+    v = String(v || "").replace(/^v/, "");
+    const dash = v.indexOf("-");
+    return { nums: (dash < 0 ? v : v.slice(0, dash)).split(".").map((x) => parseInt(x, 10) || 0),
+             suffix: dash < 0 ? "" : v.slice(dash + 1) };
+  };
+  const x = split(a), y = split(b);
+  for (let i = 0; i < Math.max(x.nums.length, y.nums.length); i++) {
+    const d = (x.nums[i] || 0) - (y.nums[i] || 0);
+    if (d) return d < 0 ? -1 : 1;
+  }
+  if (x.suffix === y.suffix) return 0;
+  if (!x.suffix) return 1;
+  if (!y.suffix) return -1;
+  return x.suffix < y.suffix ? -1 : 1;
+}
+
+// What to tell the user. installed: parseAppHead() result (or null); latest:
+// the page's manifest for that edition. Returns one of
+//   none    no firmware on the board
+//   legacy  firmware from before v2.3.0 (no Coglet description)
+//   unknown the page's firmware doesn't say its version (old manifest)
+//   older   an update is available
+//   same    up to date
+//   own     the user's own build ("local") of the same version
+//   other   another build of the same version (test builds)
+//   newer   newer than the page's
+export function firmwareVerdict(installed, latest) {
+  if (!installed) return "none";
+  if (!installed.coglet) return "legacy";
+  const latestVersion = latest && (latest.fw_version || (/^v\d/.test(latest.version || "") ? latest.version : ""));
+  if (!latestVersion) return "unknown";
+  const c = compareVersions(installed.version, latestVersion);
+  if (c < 0) return "older";
+  if (c > 0) return "newer";
+  if (installed.commit === "local") return "own";
+  if (latest.fw_commit && installed.commit && installed.commit !== latest.fw_commit) return "other";
+  return "same";
+}

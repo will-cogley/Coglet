@@ -1,7 +1,7 @@
 # Coglet Web Flasher, automatic RP2040 updates, Settings and "My songs"
 
-Update Coglet, change its wake word and reminder sound, and add your own songs
-from the browser, with no ESP-IDF, Thonny or ffmpeg install. Flashing the ESP32-S3 is all users ever need to do:
+Update Coglet, check which version it runs, change its wake word and reminder
+sound, and add your own songs from the browser, with no ESP-IDF, Thonny or ffmpeg install. Flashing the ESP32-S3 is all users ever need to do:
 the ESP then keeps the RP2040 (servo board) up to date by itself.
 
 **Page:** https://will-cogley.github.io/Coglet/
@@ -32,9 +32,41 @@ After an update the page restarts Coglet, shows its boot log and reads it:
 | Coglet's log says | The page shows |
 |---|---|
 | `RP2040 did not answer` | "One more step": the servo board setup card is highlighted and gets the focus |
-| `sending N files` | Coglet is updating its servo board, keep it plugged in |
-| `RP2040 updated` / `up to date` | All set |
-| `RP2040 update failed` | It retries on the next start; the setup card is the fallback |
+| `sending N of M files` | Coglet is updating its servo board, keep it plugged in |
+| `RP2040 running again` / `up to date` | All set (firmware before v2.3.0 doesn't print `running again`: then 35 s after `RP2040 updated`) |
+| `RP2040 update failed` / `did not answer within` | It retries on the next start; the setup card is the fallback |
+
+### Check my Coglet
+
+**Check my Coglet** (next to Connect & Update) tells users whether an update
+is worth it, without writing anything:
+
+1. It connects like an update and reads three small areas of the flash: the
+   partition table (0x8000), `otadata` (which app slot boots: after an OTA
+   update that can be `ota_1`) and the first 1 KB of that app slot.
+2. There it finds ESP-IDF's app description (the firmware version,
+   `PROJECT_VER`) and Coglet's own description (`main/coglet_app_desc.h`:
+   edition and build), and compares them with the page's firmware of the same
+   edition (`fw_version` / `fw_commit` in its manifest):
+
+   | Result | Shown as |
+   |---|---|
+   | older version | Update available (warning) |
+   | same version and build | Up to date, no need to update |
+   | newer version | Newer than the page's (a test build), no need to update |
+   | same version, build `local` | The user's own build |
+   | same version, other build | Another build of the same version (test builds) |
+   | no Coglet description | Firmware from before v2.3.0, update recommended |
+   | no app image | No firmware found |
+
+   The edition choice is set to the Coglet's own edition, so **Connect &
+   Update** keeps it (picking another edition still switches).
+3. It restarts Coglet and reports on the servo board (RP2040) from the boot
+   log, as in the table above: up to date, being updated, or needing the
+   one-time setup. Coglet only checks it once it is connected to Wi-Fi.
+
+The RP2040 has no version number of its own: the ESP carries the RP2040
+program and keeps it in sync, so "matches the ESP" is what matters.
 
 **Show device log** opens the log at any time and **Copy log** copies it for
 support requests.
@@ -290,12 +322,21 @@ In the GitHub repository (admin rights needed):
    deploy to github-pages due to environment protection rules").
 
 ### Publishing a release
-Push a version tag:
+Push a version tag (or create a release with a new tag on GitHub):
 
 ```bash
-git tag v2.1.0
-git push origin v2.1.0
+git tag v2.3.0
+git push origin v2.3.0
 ```
+
+Tags must look like `v2.3.0` or `v2.4.0-beta1`; the workflow refuses
+anything else. The tag without `v` becomes the firmware's own version
+(`idf.py -D PROJECT_VER=2.3.0`), which **Check my Coglet** reads back from a
+Coglet. It must stay plain numbers (with an optional `-suffix`): xiaozhi's OTA
+check compares it number by number. Re-running an existing tag builds the
+commit that tag points to, not the latest one; for new code, make a new tag.
+Builds without a tag (and local builds) use the default in
+`CogletESP/CMakeLists.txt`; raise it there for each new version.
 
 The **Firmware** workflow (`.github/workflows/firmware.yml`):
 
@@ -317,7 +358,9 @@ The **Firmware** workflow (`.github/workflows/firmware.yml`):
    contains the parts and an esptool command line for manual flashing.
 
 You can also start the workflow by hand from the **Actions** tab. That builds
-and deploys a `dev-<commit>` version without creating a release.
+and deploys a `dev-<commit>` version without creating a release. Every CI
+build also stores its short commit in the firmware
+(`-D COGLET_BUILD_COMMIT=...`); local builds store `local`.
 
 ### How the page works
 `tools/web_flasher/index.html` is a single static page. It uses

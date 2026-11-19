@@ -89,6 +89,39 @@ def library_kb(build):
     return int(cfg.get("COGLET_MUSIC_LIBRARY_KB", DEFAULT_LIBRARY_KB))
 
 
+def read_app_version(build, flasher, edition):
+    """Version from ESP-IDF's app description and edition / commit from
+    Coglet's (main/coglet_app_desc.h), read from the built app image exactly
+    like the web page reads them from a Coglet."""
+    version = ""
+    try:
+        with open(os.path.join(build, "project_description.json"), encoding="utf-8") as f:
+            version = json.load(f).get("project_version", "")
+    except OSError:
+        pass
+    app = flasher.get("app", {}).get("file")
+    found = {"version": version, "commit": ""}
+    if not app:
+        return found
+    with open(os.path.join(build, app), "rb") as f:
+        head = f.read(4096)
+    # esp_image_header_t (24) + first segment header (8), then esp_app_desc_t
+    if len(head) >= 32 + 256 and struct.unpack_from("<I", head, 32)[0] == 0xABCD5432:
+        found["version"] = head[48:80].split(b"\0")[0].decode("ascii", "replace")
+    i = head.find(b"LGOCCOGLET\0")
+    if i < 0:
+        print("::warning::no Coglet app description in {}: the web page can't tell the "
+              "edition of Coglets running this build".format(app))
+        return found
+    ed = head[i + 16:i + 32].split(b"\0")[0].decode("ascii", "replace")
+    found["commit"] = head[i + 32:i + 48].split(b"\0")[0].decode("ascii", "replace")
+    if ed != edition:
+        sys.exit("{} says edition {!r}, but --edition is {!r}".format(app, ed, edition))
+    print("  app description: version {}, edition {}, build {} (at 0x{:x})".format(
+        found["version"], ed, found["commit"], i))
+    return found
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--build", required=True)
@@ -105,7 +138,7 @@ def main(argv=None):
         flasher = json.load(f)
 
     chip = flasher.get("extra_esptool_args", {}).get("chip", "esp32s3")
-    settings = flasher.get("flash_settings", {})
+    flash_settings = flasher.get("flash_settings", {})
     folder = "firmware" if args.edition == "standard" else "firmware-" + args.edition
     out_dir = os.path.join(args.site, folder)
     os.makedirs(out_dir, exist_ok=True)
@@ -149,18 +182,24 @@ def main(argv=None):
         })
         print("  0x{:07x}  {:>9} bytes  {}".format(offset, len(data), name))
 
+    fw = read_app_version(args.build, flasher, args.edition)
+
     manifest = {
         "name": "Coglet",
         "version": args.version,
+        # What the firmware itself reports (esp_app_desc / Coglet app desc);
+        # the web page compares it with what a Coglet has installed.
+        "fw_version": fw["version"],
+        "fw_commit": fw["commit"],
         "commit": args.commit,
         "repo": args.repo,
         "edition": args.edition,
         "folder": folder,
         "built": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "chip": chip,
-        "flash_mode": settings.get("flash_mode", "keep"),
-        "flash_freq": settings.get("flash_freq", "keep"),
-        "flash_size": settings.get("flash_size", "keep"),
+        "flash_mode": flash_settings.get("flash_mode", "keep"),
+        "flash_freq": flash_settings.get("flash_freq", "keep"),
+        "flash_size": flash_settings.get("flash_size", "keep"),
         "parts": parts,
     }
     if settings:
@@ -171,7 +210,7 @@ def main(argv=None):
         print("song library: 0x{:x}, {} KB".format(songs["offset"], songs["size"] // 1024))
     with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
-    print("manifest: {} parts, version {}".format(len(parts), args.version))
+    print("manifest: {} parts, version {} (firmware {})".format(len(parts), args.version, fw["version"]))
 
     if args.release_dir:
         os.makedirs(args.release_dir, exist_ok=True)

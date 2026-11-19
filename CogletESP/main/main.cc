@@ -13,6 +13,7 @@
 #include "system_info.h"
 #include "uart_component.h"
 #include "coglet_rp2040_sync.h"
+#include "coglet_app_desc.h"
 
 #define TAG "main"
 
@@ -47,7 +48,7 @@ static void LogResetReason()
 extern "C" void app_main(void)
 {
     LogResetReason();
-    ESP_LOGI(TAG, "Coglet firmware edition: %s", CogletEdition::kName);
+    ESP_LOGI(TAG, "Coglet firmware edition: %s, build %s", CogletEdition::kName, CogletAppDesc::Get().commit);
     uart_init_component();
     // Initialize the default event loop
     ESP_ERROR_CHECK(esp_event_loop_create_default());

@@ -332,8 +332,12 @@
     <p class="callout note" data-i18n="update.custom"><b>Built your own firmware?</b> (for example with songs in the <code>Music</code> folder, or changed settings) This installs the official version instead; rebuild yours afterwards. Songs added under <b>My songs</b> on this page are always kept.</p>
     <div class="row" style="margin-top:18px">
       <button type="button" id="flash" data-i18n="btn.flash">Connect &amp; Update</button>
+      <button type="button" id="fwcheck" class="secondary" data-i18n="btn.fwcheck">Check my Coglet</button>
       <button type="button" id="monitor" class="secondary" data-i18n="log.show">Show device log</button>
     </div>
+    <p class="note" data-i18n="check.note"><b>Not sure whether to update?</b> <b>Check my Coglet</b> shows which firmware and edition your Coglet runs, compares it with the latest, and then restarts Coglet to check its servo board.</p>
+    <div id="fwinstalled" class="status" role="status" aria-live="polite"></div>
+    <div id="fwservo" class="status" role="status" aria-live="polite"></div>
     <progress id="progress" value="0" max="100" class="hidden" aria-label="Update progress" data-i18n-aria="aria.updateProgress"></progress>
     <div id="status" class="status" role="status" aria-live="polite"></div>
 
@@ -764,7 +768,7 @@ const sentence = (e) => { const m = errText(e); return /[.?!。！？]$/.test(m)
 let busyNow = false;
 function busy(on) {
   busyNow = on;
-  for (const b of [flashBtn, monitorBtn, rpBtn, rpCheckBtn, $("songread"), $("setread"), $("setsave")]) {
+  for (const b of [flashBtn, monitorBtn, rpBtn, rpCheckBtn, $("fwcheck"), $("songread"), $("setread"), $("setsave")]) {
     b.disabled = on || !supported;
   }
   if (!manifest || !manifest.settings) { $("setread").disabled = true; $("setsave").disabled = true; }
@@ -993,27 +997,40 @@ async function startMonitor(port, reset) {
 }
 
 // Watch Coglet's boot for the servo board (RP2040) sync and report it.
-function watchServoBoard(say, { onNeeded } = {}) {
+// After a transfer the RP2040 restarts; firmware from v2.3.0 on reports
+// "RP2040 running again" once it answers, older firmware doesn't (then the
+// update counts as done a little later).
+const RP_KEYS = { needed: "rp.neededStatus", updating: "rp.updating", done: "rp.allSet", retry: "rp.retry" };
+function watchServoBoard(say, { onNeeded, keys = RP_KEYS } = {}) {
   let seen = false;
+  let restartTimer = null;
+  const finish = (key, kind) => {
+    watchers.delete(w);
+    if (restartTimer) clearTimeout(restartTimer);
+    say(t(key), kind);
+  };
   const w = (line) => {
     if (!/CogletRp2040/.test(line)) return;
     seen = true;
-    if (/did not answer/.test(line)) {
-      watchers.delete(w);
-      say(t("rp.neededStatus"), "warn");
+    if (/RP2040 did not answer:/.test(line)) {          // no updater: one-time setup needed
+      finish(keys.needed, "warn");
       if (onNeeded) onNeeded();
-    } else if (/sending \d+ files/.test(line)) {
-      say(t("rp.updating"));
-    } else if (/RP2040 updated|RP2040 up to date/.test(line)) {
-      watchers.delete(w);
-      say(t("rp.allSet"), "ok");
+    } else if (/sending \d+ (of \d+ )?files/.test(line)) {
+      say(t(keys.updating));
+    } else if (/RP2040 up to date|is up to date/.test(line)) {
+      finish(keys.done, "ok");
+    } else if (/RP2040 running again/.test(line)) {
+      finish(keys.done, "ok");
+    } else if (/did not answer within/.test(line)) {    // restarted but silent
+      finish(keys.retry, "warn");
+    } else if (/RP2040 updated/.test(line)) {
+      restartTimer = setTimeout(() => { if (watchers.has(w)) finish(keys.done, "ok"); }, 35000);
     } else if (/update failed/.test(line)) {
-      watchers.delete(w);
-      say(t("rp.retry"), "warn");
+      finish(keys.retry, "warn");
     }
   };
   watchers.add(w);
-  setTimeout(() => { if (!seen) watchers.delete(w); }, 60000);
+  setTimeout(() => { if (!seen) watchers.delete(w); }, 120000);
   return w;
 }
 
@@ -1126,6 +1143,88 @@ $("copy").addEventListener("click", async () => {
     status(t("log.copied"), "ok");
   } catch (e) {
     status(t("log.copyFailed"), "warn");
+  }
+});
+
+// ------------------------------------------------------------------ installed version
+// "Check my Coglet": read which firmware Coglet runs (see readInstalled), say
+// whether an update is worth it, then restart Coglet and report on its servo
+// board like after an update.
+const fwInstalled = (txt, k) => setStatus($("fwinstalled"), txt, k);
+const fwServo = (txt, k) => setStatus($("fwservo"), txt, k);
+
+async function readInstalled(loader) {
+  const parts = Songs.parsePartitions(await loader.readFlash(Songs.PARTITION_TABLE, Songs.PARTITION_TABLE_SIZE));
+  const slots = Songs.appSlots(parts);
+  const ota = slots.filter((p) => p.subtype >= 0x10);
+  const od = parts.find((p) => p.type === 1 && p.subtype === 0);
+  let pick = null;
+  if (od && ota.length) {
+    const i = Songs.otaSlotFromData(await loader.readFlash(od.offset, Math.min(od.size, 0x2000)), ota.length);
+    if (i !== null) pick = ota[i];
+  }
+  for (const slot of pick ? [pick, ...slots.filter((x) => x !== pick)] : slots) {
+    const app = Songs.parseAppHead(await loader.readFlash(slot.offset, Songs.APP_HEAD_SIZE));
+    if (app) { app.slot = slot.name; log("installed: " + JSON.stringify(app)); return app; }
+  }
+  log("installed: no app image found");
+  return null;
+}
+
+const editionName = (ed) => t(EDITIONS.includes(ed) ? "fw." + ed : "check.standard");
+const shownVersion = (m) => m.fw_version ? "v" + m.fw_version : m.version;
+
+function showInstalled(app) {
+  const ed = app && app.coglet ? app.edition : "";
+  const latest = (ed && manifests[ed]) || manifest;
+  const verdict = Songs.firmwareVerdict(app, latest);
+  const vars = { version: app ? "v" + app.version.replace(/^v/, "") : "", latest: shownVersion(latest),
+                 edition: ed ? editionName(ed) : "", commit: app ? app.commit : "",
+                 latestCommit: latest.fw_commit || latest.commit || "" };
+  let text = t("check.v." + verdict, vars);
+  if (ed && manifests[ed] && editionChoice() !== ed) {
+    // Pick the Coglet's own edition below, so "Update" keeps it.
+    const radio = document.querySelector('input[name="edition"][value="' + ed + '"]');
+    if (radio) { radio.checked = true; showManifest(); text += " " + t("check.editionSet", vars); }
+  } else if (ed && ed !== "standard" && !manifests[ed]) {
+    text += " " + t("check.editionGone", vars);
+  }
+  const kind = { same: "ok", newer: "ok", own: "ok", unknown: "" }[verdict];
+  fwInstalled(text, kind === undefined ? "warn" : kind);
+}
+
+const fwCheckBtn = $("fwcheck");
+fwCheckBtn.addEventListener("click", async () => {
+  if (!manifest || busyNow) return;
+  busy(true);
+  logEl.textContent = "";
+  fwInstalled("");
+  fwServo("");
+  let conn = null;
+  try {
+    fwInstalled(t("choose.coglet"));
+    conn = await connectEsp(fwInstalled);
+    fwInstalled(t("check.reading"));
+    showInstalled(await readInstalled(conn.loader));
+    fwServo(t("check.rp.checking"));
+    const w = watchServoBoard(fwServo, { keys: { needed: "check.rp.needed", updating: "rp.updating",
+                                                 done: "check.rp.ok", retry: "rp.retry" },
+                                         onNeeded: showServoBoardNeeded });
+    const port = conn.port;
+    await conn.loader.after("hard_reset");
+    try { await conn.transport.disconnect(); } catch (e) {}
+    conn = null;
+    await startMonitor(port, true);
+    setTimeout(() => {
+      if (watchers.has(w)) { watchers.delete(w); fwServo(t("check.rp.noReport"), "warn"); }
+    }, 90000);
+  } catch (e) {
+    if (noPort(e)) fwInstalled(t("update.noPort"), "warn");
+    else { fwInstalled(t("check.failed", { error: errText(e) }), "err"); $("logbox").open = true; }
+    log("error: " + errText(e));
+  } finally {
+    try { if (conn) await conn.transport.disconnect(); } catch (e) {}
+    busy(false);
   }
 });
 
@@ -1304,7 +1403,7 @@ rpCheckBtn.addEventListener("click", async () => {
         watchers.delete(w);
         rpStatus(t("rp.noReport"), "warn");
       }
-    }, 30000);
+    }, 90000);
   } catch (e) {
     if (!noPort(e)) rpStatus(t("rp.openFailed", { error: errText(e) }), "warn");
   }

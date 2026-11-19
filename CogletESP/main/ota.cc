@@ -386,7 +386,16 @@ std::vector<int> Ota::ParseVersion(const std::string& version) {
     std::string segment;
     
     while (std::getline(ss, segment, '.')) {
-        versionNumbers.push_back(std::stoi(segment));
+        // Leading digits only, never throws: "0-beta" -> 0, "x" -> 0. (The
+        // version comes from the OTA server too; std::stoi would abort on
+        // text without digits.)
+        int n = 0;
+        for (char c : segment) {
+            if (c < '0' || c > '9') break;
+            n = n * 10 + (c - '0');
+            if (n > 1000000) break;
+        }
+        versionNumbers.push_back(n);
     }
     
     return versionNumbers;

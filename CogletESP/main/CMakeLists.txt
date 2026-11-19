@@ -1,6 +1,7 @@
 # Define source files
 set(SOURCES "coglet_reminder.cc"
             "coglet_rp2040_sync.cc"
+            "coglet_app_desc.cc"
             "coglet_settings.cc"
             "audio/audio_codec.cc"
             "audio/audio_service.cc"
@@ -785,10 +786,20 @@ endif()
 if(NOT BOARD_NAME)
     set(BOARD_NAME ${BOARD_TYPE})
 endif()
+# Short commit of a CI build (idf.py -D COGLET_BUILD_COMMIT=abc1234), read
+# back by the web flasher; "local" for builds on a computer.
+if(NOT COGLET_BUILD_COMMIT)
+    set(COGLET_BUILD_COMMIT "local")
+endif()
 target_compile_definitions(${COMPONENT_LIB}
                     PRIVATE BOARD_TYPE=\"${BOARD_TYPE}\" BOARD_NAME=\"${BOARD_NAME}\"
+                    PRIVATE COGLET_BUILD_COMMIT=\"${COGLET_BUILD_COMMIT}\"
                     PRIVATE BUILTIN_TEXT_FONT=${BUILTIN_TEXT_FONT} BUILTIN_ICON_FONT=${BUILTIN_ICON_FONT}
                     )
+
+# Keep Coglet's app description (main/coglet_app_desc.cc) in the image even
+# if nothing referenced it, as ESP-IDF's "custom app description" docs advise.
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-u coglet_app_desc")
 
 # Add generation rules
 add_custom_command(
