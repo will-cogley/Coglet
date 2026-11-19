@@ -1,5 +1,7 @@
 # Builds the Coglet ESP32-S3 firmware and publishes it:
 #   * GitHub Pages: the web flasher (CogletESP/tools/web_flasher) + firmware parts
+#     of every edition (standard -> firmware/, Christmas -> firmware-christmas/,
+#     Elf -> firmware-elf/, Snowman -> firmware-snowman/)
 #   * GitHub Release: a zip of the parts (on version tags only)
 #
 # Runs on version tags (v1.2.3) and can be started by hand from the Actions tab.
@@ -27,13 +29,53 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build firmware
+      # The firmware's own version (what the web flasher reads back): the tag
+      # without "v" (v2.3.0 -> 2.3.0), else the default in CogletESP/CMakeLists.txt.
+      # Only plain numbers with an optional -suffix: the OTA check parses it.
+      - name: Firmware version
+        shell: bash
+        run: |
+          BUILD_ARGS="-D COGLET_BUILD_COMMIT=${GITHUB_SHA::7}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            if ! [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+)?$ ]]; then
+              echo "::error::Tag ${GITHUB_REF_NAME} is not like v2.3.0 or v2.4.0-beta1"
+              exit 1
+            fi
+            BUILD_ARGS="${BUILD_ARGS} -D PROJECT_VER=${GITHUB_REF_NAME#v}"
+          fi
+          echo "BUILD_ARGS=${BUILD_ARGS}" >> "$GITHUB_ENV"
+
+      - name: Build firmware (standard edition)
         shell: bash
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           . "$IDF_PATH/export.sh"
           cd CogletESP
-          idf.py build
+          idf.py ${BUILD_ARGS} build
+
+      - name: Build firmware (Christmas edition)
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          cd CogletESP
+          idf.py ${BUILD_ARGS} -B build-christmas -D SDKCONFIG=build-christmas/sdkconfig \
+                 -D SDKCONFIG_DEFAULTS="sdkconfig;sdkconfig.christmas" build
+
+      - name: Build firmware (Elf edition)
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          cd CogletESP
+          idf.py ${BUILD_ARGS} -B build-elf -D SDKCONFIG=build-elf/sdkconfig \
+                 -D SDKCONFIG_DEFAULTS="sdkconfig;sdkconfig.elf" build
+
+      - name: Build firmware (Snowman edition)
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          cd CogletESP
+          idf.py ${BUILD_ARGS} -B build-snowman -D SDKCONFIG=build-snowman/sdkconfig \
+                 -D SDKCONFIG_DEFAULTS="sdkconfig;sdkconfig.snowman" build
 
       - name: Collect parts, manifest and web page
         shell: bash
@@ -44,9 +86,18 @@ jobs:
           python CogletESP/tools/web_flasher/make_manifest.py \
             --build CogletESP/build --site site --release-dir release \
             --version "$VERSION" --commit "${GITHUB_SHA::7}" --repo "${GITHUB_REPOSITORY}"
+          python CogletESP/tools/web_flasher/make_manifest.py \
+            --build CogletESP/build-christmas --site site --release-dir release --edition christmas \
+            --version "$VERSION" --commit "${GITHUB_SHA::7}" --repo "${GITHUB_REPOSITORY}"
+          python CogletESP/tools/web_flasher/make_manifest.py \
+            --build CogletESP/build-elf --site site --release-dir release --edition elf \
+            --version "$VERSION" --commit "${GITHUB_SHA::7}" --repo "${GITHUB_REPOSITORY}"
+          python CogletESP/tools/web_flasher/make_manifest.py \
+            --build CogletESP/build-snowman --site site --release-dir release --edition snowman \
+            --version "$VERSION" --commit "${GITHUB_SHA::7}" --repo "${GITHUB_REPOSITORY}"
           python CogletESP/tools/rp2040_bundle/build_bundle.py \
             --src CogletESP/RP2040 --site site/rp2040
-          cp CogletESP/tools/web_flasher/index.html CogletESP/tools/web_flasher/coglet_songs.js site/
+          cp CogletESP/tools/web_flasher/index.html CogletESP/tools/web_flasher/coglet_songs.js CogletESP/tools/web_flasher/coglet_i18n.js site/
           touch site/.nojekyll
 
       - uses: actions/upload-pages-artifact@v3
