@@ -1104,11 +1104,11 @@ function showServoBoardNeeded() {
 // ------------------------------------------------------------------ ESP connection
 const terminal = { clean() {}, writeLine: (d) => log(d), write: (d) => { logEl.textContent += d; } };
 
-async function connectEsp(say) {
+async function connectEsp(say, baud) {
   await stopMonitor();
   const port = await getPort("esp");
   const transport = new Transport(port, false);
-  const loader = new ESPLoader({ transport, baudrate: parseInt($("baud").value, 10), terminal });
+  const loader = new ESPLoader({ transport, baudrate: baud || parseInt($("baud").value, 10), terminal });
   say(t("esp.connecting"));
   let chip;
   try {
@@ -1126,6 +1126,23 @@ async function connectEsp(say) {
   }
   return { port, transport, loader };
 }
+
+// Errors of a link that loses data (as opposed to a missing or wrong device).
+const serialGlitch = (e) => /stream stopped|noise|corrupt|timed? ?out|invalid head|unexpected (packet|response)|checksum|md5 of file does not match/i.test(errText(e));
+// The chosen speed and the slower ones offered in Advanced options.
+function slowerBauds(chosen) {
+  const all = Array.from($("baud").options).map((o) => parseInt(o.value, 10)).sort((a, b) => b - a);
+  return all.filter((b) => b <= chosen);
+}
+// A speed that worked after a slower retry is kept for next time.
+function rememberBaud(baud) {
+  $("baud").value = String(baud);
+  try { localStorage.setItem("coglet.baud", String(baud)); } catch (e) {}
+}
+try {
+  const saved = localStorage.getItem("coglet.baud");
+  if (saved && Array.from($("baud").options).some((o) => o.value === saved)) $("baud").value = saved;
+} catch (e) {}
 
 async function finishAndWatch(conn, say, onNeeded) {
   await conn.loader.after("hard_reset");
@@ -1153,22 +1170,38 @@ flashBtn.addEventListener("click", async () => {
     await getPort("esp");
     if (erase && !confirm(t("update.confirmErase"))) { status(""); return; }
     const files = await downloadParts();
-    conn = await connectEsp(status);
     const total = files.reduce((s, f) => s + f.data.length, 0);
     const before = files.map((f, i) => files.slice(0, i).reduce((s, g) => s + g.data.length, 0));
-    const progress = progressReporter($("progress"), t("update.writingLabel"));
-    status(t(erase ? "update.erasing" : "update.writing"));
-    progress(0, t("progress.mb", { done: mb(0), total: mb(total) }));
-    await conn.loader.writeFlash({
-      fileArray: files.map((f) => ({ data: f.data, address: f.address })),
-      flashMode: "keep", flashFreq: "keep", flashSize: "keep",
-      eraseAll: erase, compress: true,
-      reportProgress: (i, written, size) => {
-        const at = before[i] + (written / size) * files[i].data.length;
-        progress(at / total, t("progress.mb", { done: mb(at), total: mb(total) }));
-      },
-      calculateMD5Hash: (image) => md5(image),
-    });
+    // Some USB-serial chips (and their macOS drivers) drop data at high
+    // speed: then write everything again at the next lower speed.
+    const bauds = slowerBauds(parseInt($("baud").value, 10));
+    for (let k = 0; ; k++) {
+      conn = await connectEsp(status, bauds[k]);
+      const progress = progressReporter($("progress"), t("update.writingLabel"));
+      if (k === 0) status(t(erase ? "update.erasing" : "update.writing"));
+      progress(0, t("progress.mb", { done: mb(0), total: mb(total) }));
+      try {
+        await conn.loader.writeFlash({
+          fileArray: files.map((f) => ({ data: f.data, address: f.address })),
+          flashMode: "keep", flashFreq: "keep", flashSize: "keep",
+          eraseAll: erase, compress: true,
+          reportProgress: (i, written, size) => {
+            const at = before[i] + (written / size) * files[i].data.length;
+            progress(at / total, t("progress.mb", { done: mb(at), total: mb(total) }));
+          },
+          calculateMD5Hash: (image) => md5(image),
+        });
+        if (k > 0) rememberBaud(bauds[k]);
+        break;
+      } catch (e) {
+        if (!serialGlitch(e) || k + 1 >= bauds.length) throw e;
+        log("writing failed at " + bauds[k] + " baud (" + errText(e) + "), trying " + bauds[k + 1]);
+        try { await conn.transport.disconnect(); } catch (x) {}
+        conn = null;
+        status(t("update.slower", { baud: bauds[k + 1] }), "warn");
+        await sleep(800);
+      }
+    }
     $("progress").value = 100;
     log("done");
     const doneKey = { christmas: "update.doneChristmas", elf: "update.doneElf",
@@ -1180,7 +1213,7 @@ flashBtn.addEventListener("click", async () => {
     if (noPort(e)) {
       status(t("update.noPort"), "warn");
     } else {
-      status(t("update.failed", { error: errText(e) }), "err");
+      status(t(serialGlitch(e) ? "update.failedLink" : "update.failed", { error: errText(e) }), "err");
       $("logbox").open = true;
     }
     log("error: " + errText(e));

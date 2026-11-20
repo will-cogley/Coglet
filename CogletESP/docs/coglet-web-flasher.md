@@ -370,6 +370,22 @@ each part is checked against the manifest's MD5, and the flash writes are
 verified the same way. Flash mode, frequency and size are kept as built. The
 page refuses to flash anything that isn't an ESP32-S3.
 
+A few details that matter on slow connections and some computers:
+
+* **The port comes first.** Browsers show the port list only within a few
+  seconds of a click, so every button asks for the port before downloading
+  anything (on a slow connection the old order failed with "Must be handling
+  a user gesture").
+* **Progress** is shown in percent and megabytes for the download and the
+  writing. The firmware is downloaded once per page visit; trying again
+  doesn't download it again.
+* **Lower speed on a lossy link.** If writing fails because the USB link loses
+  data ("Serial data stream stopped", seen with some USB-serial drivers on
+  macOS), the page writes everything again at the next lower speed from
+  Advanced options (921600 → 460800 → 115200) and remembers the speed that
+  worked. If even 115200 fails, it suggests another cable or port without a
+  hub.
+
 ### Accessibility
 The page works with a keyboard alone (skip link, visible focus, logical tab
 order) and with screen readers: every control is labelled, progress and
