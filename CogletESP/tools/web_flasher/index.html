@@ -144,6 +144,9 @@
            border: 1px solid var(--warn); border-radius: 999px; padding: 0 8px; margin-right: 4px; font-size: 0.88rem; }
   .meter { margin-top: 12px; }
   .meter progress { margin-top: 4px; }
+  .progressinfo { margin-top: 4px; font-size: .85em; color: var(--muted); font-variant-numeric: tabular-nums; }
+  progress.hidden + .progressinfo { display: none; }
+  #fwinstalled:empty, #fwservo:empty { display: none; }
   /* status words carry the meaning; the symbol helps when colours look alike */
   .status.ok::before { content: "✓ " / ""; }
   .status.warn::before { content: "⚠ " / ""; }
@@ -274,6 +277,7 @@
 </div>
 <a class="skip" href="#update" data-i18n="skip">Skip to the updater</a>
 <div id="announce" class="sr-only" aria-live="assertive" aria-atomic="true"></div>
+<div id="srprogress" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 <main>
   <h1>Coglet Updater</h1>
   <p class="sub" data-i18n="sub">Update your Coglet and add your own songs, right from this page. Nothing to install. Your Wi-Fi settings and xiaozhi.me pairing are kept.</p>
@@ -339,6 +343,7 @@
     <div id="fwinstalled" class="status" role="status" aria-live="polite"></div>
     <div id="fwservo" class="status" role="status" aria-live="polite"></div>
     <progress id="progress" value="0" max="100" class="hidden" aria-label="Update progress" data-i18n-aria="aria.updateProgress"></progress>
+    <div class="progressinfo" aria-hidden="true"></div>
     <div id="status" class="status" role="status" aria-live="polite"></div>
 
     <details id="advanced">
@@ -404,6 +409,7 @@
       <button type="button" id="rpcheck" class="secondary" data-i18n="btn.rpcheck">Check Coglet</button>
     </div>
     <progress id="rpprogress" value="0" max="100" class="hidden" aria-label="Servo board setup progress" data-i18n-aria="aria.rpProgress"></progress>
+    <div class="progressinfo" aria-hidden="true"></div>
     <div id="rpstatus" class="status" role="status" aria-live="polite"></div>
   </section>
 
@@ -478,6 +484,7 @@
       <button type="button" id="songsave" disabled data-i18n="btn.save">Save to Coglet</button>
     </div>
     <progress id="songprogress" value="0" max="100" class="hidden" aria-label="Saving songs" data-i18n-aria="aria.songProgress"></progress>
+    <div class="progressinfo" aria-hidden="true"></div>
     <div id="songstatus" class="status" role="status" aria-live="polite"></div>
   </section>
 
@@ -776,18 +783,31 @@ function busy(on) {
   updateSongButtons();
 }
 
-// Progress bars also speak at every quarter for screen readers.
-function progressReporter(bar, label, say) {
+// Progress bars show the exact percentage (and an optional detail such as
+// megabytes) on the line under them. Screen readers hear it at every quarter
+// (#srprogress); the line itself is hidden from them so they aren't flooded,
+// and the status line keeps its plain text (no second, older percentage).
+function progressReporter(bar, label) {
   let lastQuarter = -1;
+  const info = bar.nextElementSibling && bar.nextElementSibling.classList.contains("progressinfo")
+    ? bar.nextElementSibling : null;
   bar.value = 0;
   bar.classList.remove("hidden");
-  return (frac) => {
-    const pct = Math.max(0, Math.min(100, Math.round(frac * 100)));
-    bar.value = pct;
+  if (info) info.textContent = "";
+  return (frac, detail) => {
+    const exact = Math.max(0, Math.min(100, frac * 100));
+    const pct = Math.round(exact);
+    bar.value = exact;
+    if (info) info.textContent = I18n.num(pct) + "%" + (detail ? " · " + detail : "");
     const q = Math.floor(pct / 25);
-    if (q !== lastQuarter && pct < 100) { lastQuarter = q; say(t("progress", { label, pct: I18n.num(pct) })); }
+    if (q !== lastQuarter && pct < 100) {
+      lastQuarter = q;
+      $("srprogress").textContent = t("progress", { label, pct: I18n.num(pct) });
+    }
   };
 }
+
+const mb = (n) => I18n.num(n / 1048576, 1);
 
 function md5(bytes) {
   return CryptoJS.MD5(CryptoJS.lib.WordArray.create(bytes)).toString();
@@ -869,14 +889,39 @@ async function loadManifest() {
   busy(false);
 }
 
+// Downloads the firmware parts with byte-level progress (the app part is
+// several MB, so a per-file count looked stuck on slow connections).
 async function downloadParts() {
   const files = [];
-  let done = 0;
+  const total = manifest.parts.reduce((sum, p) => sum + p.size, 0);
+  const progress = progressReporter($("progress"), t("fw.downloadingLabel"));
+  const show = (got) => progress(got / total, t("progress.mb", { done: mb(got), total: mb(total) }));
+  status(t("fw.downloading"));
+  let before = 0;
+  show(0);
   for (const part of manifest.parts) {
-    status(t("fw.downloading", { done: ++done, total: manifest.parts.length }));
     const r = await fetch((manifest.folder || "firmware") + "/" + part.path, { cache: "no-store" });
     if (!r.ok) throw new Error(t("fw.downloadFailed", { file: part.path, code: r.status }));
-    const data = new Uint8Array(await r.arrayBuffer());
+    let data;
+    if (r.body && r.body.getReader) {
+      const reader = r.body.getReader();
+      const chunks = [];
+      let got = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        got += value.length;
+        show(before + Math.min(got, part.size));
+      }
+      data = new Uint8Array(got);
+      let at = 0;
+      for (const c of chunks) { data.set(c, at); at += c.length; }
+    } else {
+      data = new Uint8Array(await r.arrayBuffer());
+    }
+    before += part.size;
+    show(before);
     if (data.length !== part.size || md5(data) !== part.md5) {
       throw new Error(t("fw.damaged", { file: part.path }));
     }
@@ -1095,13 +1140,17 @@ flashBtn.addEventListener("click", async () => {
     conn = await connectEsp(status);
     const total = files.reduce((s, f) => s + f.data.length, 0);
     const before = files.map((f, i) => files.slice(0, i).reduce((s, g) => s + g.data.length, 0));
-    const progress = progressReporter($("progress"), t("update.writingLabel"), status);
+    const progress = progressReporter($("progress"), t("update.writingLabel"));
     status(t(erase ? "update.erasing" : "update.writing"));
+    progress(0, t("progress.mb", { done: mb(0), total: mb(total) }));
     await conn.loader.writeFlash({
       fileArray: files.map((f) => ({ data: f.data, address: f.address })),
       flashMode: "keep", flashFreq: "keep", flashSize: "keep",
       eraseAll: erase, compress: true,
-      reportProgress: (i, written, size) => progress((before[i] + (written / size) * files[i].data.length) / total),
+      reportProgress: (i, written, size) => {
+        const at = before[i] + (written / size) * files[i].data.length;
+        progress(at / total, t("progress.mb", { done: mb(at), total: mb(total) }));
+      },
       calculateMD5Hash: (image) => md5(image),
     });
     $("progress").value = 100;
@@ -1341,7 +1390,7 @@ rpBtn.addEventListener("click", async () => {
 
     const total = files.reduce((s, f) => s + f.data.length, 0);
     let sent = 0;
-    const progress = progressReporter($("rpprogress"), t("rp.writingLabel"), rpStatus);
+    const progress = progressReporter($("rpprogress"), t("rp.writingLabel"));
     await repl.exec("import binascii, os");
     for (const f of files) {
       rpStatus(t("rp.writingFile", { file: f.name }));
@@ -1657,7 +1706,7 @@ $("songsave").addEventListener("click", async () => {
     const keep = onDevice.filter((e) => !removedKeys.has(e.ogg_offset + "|" + e.name));
     const adds = readyPending().map((p) => p.song);
     let plan = Songs.planLibrary(keep, adds, area.size);
-    const progress = progressReporter($("songprogress"), t("songs.savingLabel"), songStatus);
+    const progress = progressReporter($("songprogress"), t("songs.savingLabel"));
     if (!plan) {
       // Not enough room after the last song: pack the songs that stay.
       songStatus(t("songs.makingRoom"));
