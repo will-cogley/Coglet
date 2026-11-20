@@ -890,8 +890,12 @@ async function loadManifest() {
 }
 
 // Downloads the firmware parts with byte-level progress (the app part is
-// several MB, so a per-file count looked stuck on slow connections).
+// several MB, so a per-file count looked stuck on slow connections). Kept
+// for the page's lifetime: trying again after an error doesn't download again.
+const downloaded = new Map();
 async function downloadParts() {
+  const key = (manifest.folder || "firmware") + "@" + manifest.version + "@" + (manifest.commit || "");
+  if (downloaded.has(key)) { log("firmware already downloaded"); return downloaded.get(key); }
   const files = [];
   const total = manifest.parts.reduce((sum, p) => sum + p.size, 0);
   const progress = progressReporter($("progress"), t("fw.downloadingLabel"));
@@ -928,6 +932,7 @@ async function downloadParts() {
     files.push({ data, address: part.offset, name: part.path });
     log("downloaded " + part.path + " (" + data.length + " bytes) -> 0x" + part.offset.toString(16));
   }
+  downloaded.set(key, files);
   return files;
 }
 
@@ -960,7 +965,15 @@ async function getPort(kind) {
                 : FILTERS[kind].some((f) => f.usbVendorId === i.usbVendorId);
   });
   if (!askAgain[kind] && match.length === 1) { ports[kind] = match[0]; return match[0]; }
-  const port = await navigator.serial.requestPort($("allports").checked ? {} : { filters: FILTERS[kind] });
+  // Browsers show the port list only within a few seconds of a click, so
+  // every button asks for the port first, before downloading anything.
+  let port;
+  try {
+    port = await navigator.serial.requestPort($("allports").checked ? {} : { filters: FILTERS[kind] });
+  } catch (e) {
+    if (/user gesture|user activation/i.test(errText(e))) throw new Error(t("port.clickAgain"));
+    throw e;
+  }
   remember(kind, port);
   askAgain[kind] = false;
   return port;
@@ -1129,14 +1142,17 @@ async function finishAndWatch(conn, say, onNeeded) {
 flashBtn.addEventListener("click", async () => {
   if (!manifest || busyNow) return;
   const erase = $("erase").checked;
-  if (erase && !confirm(t("update.confirmErase"))) return;
   busy(true);
   logEl.textContent = "";
   $("progress").classList.add("hidden");
   let conn = null;
   try {
-    const files = await downloadParts();
+    // The port first: the browser allows its list only right after the click,
+    // and the download can take a while on a slow connection.
     status(t("choose.coglet"));
+    await getPort("esp");
+    if (erase && !confirm(t("update.confirmErase"))) { status(""); return; }
+    const files = await downloadParts();
     conn = await connectEsp(status);
     const total = files.reduce((s, f) => s + f.data.length, 0);
     const before = files.map((f, i) => files.slice(0, i).reduce((s, g) => s + g.data.length, 0));
@@ -1355,12 +1371,16 @@ function b64(bytes) {
 
 rpBtn.addEventListener("click", async () => {
   if (busyNow) return;
-  await stopMonitor();
   busy(true);
   let setupDone = false;
   $("rpprogress").classList.add("hidden");
   let repl = null;
   try {
+    // The port first (see getPort), then the download.
+    rpStatus(t("rp.choose"));
+    forgetPort("rp");
+    const port = await getPort("rp");
+    await stopMonitor();
     rpStatus(t("rp.downloading"));
     const mr = await fetch("rp2040/manifest.json", { cache: "no-store" });
     if (!mr.ok) throw new Error(t("rp.loadFailed", { code: mr.status }));
@@ -1373,9 +1393,6 @@ rpBtn.addEventListener("click", async () => {
       if (data.length !== f.size || md5(data) !== f.md5) throw new Error(t("rp.damaged", { file: f.name }));
       files.push({ name: f.name, data });
     }
-    rpStatus(t("rp.choose"));
-    forgetPort("rp");
-    const port = await getPort("rp");
     repl = new RawRepl(port);
     await repl.open();
     rpStatus(t("rp.connecting"));
