@@ -9,7 +9,7 @@ For a getting-started guide and build instructions, refer to the [build video](h
 
 For further reading and troubleshooting, refer to the [knowledge database](https://nmrobots.com/pages/coglet) or the translated docs in this repo.
 
-Web flasher :https://will-cogley.github.io/Coglet/
+Web flasher: https://will-cogley.github.io/Coglet/
 
 # Parts List
 All components needed to build a Coglet can now be purchased through [NMRobots.com!](https://nmrobots.com/collections/coglet)
