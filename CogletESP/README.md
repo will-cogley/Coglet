@@ -9,44 +9,26 @@ inside this firmware, which keeps the RP2040 up to date by itself.
 Based on the open-source [xiaozhi-esp32](https://github.com/78/xiaozhi-esp32)
 chatbot (MIT, see [LICENSE](LICENSE)).
 
+**Documentation:** [English](docs/README.md) · [Deutsch](docs/de/README.md) ·
+[Español](docs/es/README.md) · [日本語](docs/ja/README.md)
+
 ## Updating a Coglet
 
-Most users never need to build anything: use the web flasher, see
-[docs/coglet-web-flasher.md](docs/coglet-web-flasher.md).
+Most users never need to build anything: the
+[Coglet Updater](https://will-cogley.github.io/Coglet/) updates Coglet from the
+browser. See [Getting started](docs/en/user/getting-started.md).
 
 ## Building
 
-Requires ESP-IDF 5.5 (the release workflow uses v5.5.3).
+Requires **ESP-IDF v5.5.3** (exactly this version; the release builds use it).
 
 ```bash
-idf.py set-target esp32s3   # only once
-idf.py build flash
+cd CogletESP
+idf.py build
+idf.py -p <port> flash monitor
 ```
 
-Board type: `Xiaozhi Assistant → Board Type → NMRobotics Coglet (CogNog V3.0 PCB)`,
-already selected in `sdkconfig`. Board files: [`main/boards/cognog-v3/`](main/boards/cognog-v3).
-
-Editions (different built-in dances, startup and reminder sounds) are overlays:
-
-```bash
-idf.py -B build-christmas -D SDKCONFIG=build-christmas/sdkconfig \
-       -D SDKCONFIG_DEFAULTS="sdkconfig;sdkconfig.christmas" build
-```
-
-Use `sdkconfig.elf` or `sdkconfig.snowman` the same way. Custom songs for your
-own build go in [`Music/`](Music).
-
-## Documentation
-
-Coglet:
-
-- [Web flasher, RP2040 updates, settings, "My songs"](docs/coglet-web-flasher.md)
-- [Music dance](docs/coglet-dance.md)
-- [Device-side AEC (talk over Coglet)](docs/coglet-device-aec.md)
-- [Servo power-up and standby power](docs/coglet-power.md)
-
-Inherited from xiaozhi-esp32:
-
-- [MCP protocol](docs/mcp-protocol.md) and [MCP usage](docs/mcp-usage.md)
-- [WebSocket protocol](docs/websocket.md) and [MQTT + UDP protocol](docs/mqtt-udp.md)
-- [Adding a custom board](docs/custom-board.md)
+The target, the board type (*NMRobotics Coglet (CogNog V3.0 PCB)*) and every
+Coglet option are in the committed `sdkconfig`; do not run `idf.py set-target`.
+Editions, menuconfig options and the RP2040 workflow are in
+[Building the firmware](docs/en/developer/build.md).

@@ -1,7 +1,7 @@
 // Coglet's own app description, stored in the firmware image right after
 // ESP-IDF's esp_app_desc_t (section .rodata_custom_desc). The web flasher
 // reads the start of the installed app from flash to show which version and
-// edition a Coglet runs; see docs/coglet-web-flasher.md.
+// edition a Coglet runs; see docs/en/developer/web-flasher.md.
 #pragma once
 
 #include <cstdint>

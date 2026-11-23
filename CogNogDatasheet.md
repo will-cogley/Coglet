@@ -131,7 +131,7 @@ The system can be powered via the programming port, but no power will be deliver
 | Programming Selector Switch | Use to switch which MCU is connected to the programming port USB - enabling you to program both MCUs with the same port |
 | Calibration Mode Switch | Via the RP2040, put all servos into a default position to assist with making sure all servos are properly calibrated when assembling |
 | Facetrack Mode Switch | Via the Grove Vision AI Board, track and follow user’s face in realtime (uses on-board local processing) |
-| Servo Test Button  | Via the RP2040, simultaneously wiggle all servos back and forth by a few degrees to check ROM and function during assembly/testing |
+| Servo Test Button  | In Calibration Mode, via the RP2040: hold it to wiggle all servos ±10° around their calibration position, to check ROM and function during assembly/testing |
 
 ## 2.3 Guides
 
@@ -141,9 +141,13 @@ https://youtu.be/-7I-jFSNP2E?si=6lqtyZIJ3J-2O9Dj
 
 ### 2.3.1 Manually Uploading Code
 
-1. It is recommended to follow this guide to setup ESP-IDF: https://github.com/will-cogley/Coglet/blob/main/Translated Docs for XiaoZhi AI/Setting up the ESP IDF 5.5.2 Development Environment on Windows and Compiling Xiaozhi - Feishu Docs.pdf
-2. Clone the github repository 
-3. Using ESP-IDF, build and flash 
+Most users don't need this: the [Coglet Updater](https://will-cogley.github.io/Coglet/) updates Coglet from the browser.
+
+1. Install **ESP-IDF v5.5.3** (exactly this version; the release builds use it).
+2. Clone the GitHub repository.
+3. In `CogletESP`, run `idf.py build` and `idf.py -p <port> flash`.
+
+Full guide: [Building the firmware](CogletESP/docs/en/developer/build.md) ([Deutsch](CogletESP/docs/de/developer/build.md), [Español](CogletESP/docs/es/developer/build.md), [日本語](CogletESP/docs/ja/developer/build.md)).
 
 ### 2.3.2 Adding a customised wakeword
 

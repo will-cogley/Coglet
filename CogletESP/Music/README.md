@@ -50,4 +50,4 @@ the firmware image: do not publish or sell images that contain music you are
 not allowed to distribute. Everything in this folder except this README is
 ignored by git, so your songs never land in the public repository.
 
-Full details: `docs/coglet-dance.md`.
+Full details: [Dances and songs](../docs/en/developer/dance.md).
