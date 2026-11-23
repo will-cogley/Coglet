@@ -55,9 +55,10 @@ idf.py -p <port> flash monitor
 Platinentyp: **NMRobotics Coglet (CogNog V3.0 PCB)**
 (`CONFIG_BOARD_TYPE_COGNOG_V3`), Platinendateien in
 [`main/boards/cognog-v3/`](../../../main/boards/cognog-v3). Er meldet sich als
-`cognog-v3`. Firmware bis 2.3.x verwendete den allgemeinen Platinentyp
-`bread-compact-wifi-s3cam`, der für alte lokale Konfigurationen weiterhin
-existiert.
+`cognog-v3` und ist der einzige Platinentyp dieser Firmware (bis 2.3.x verwendete
+Coglet den allgemeinen xiaozhi-Typ `bread-compact-wifi-s3cam`). Das Modell für
+das Aktivierungswort (MultiNet), die Audioverarbeitung und das Assets-Image sind
+für Coglet fest eingestellt und erscheinen nicht in menuconfig.
 
 ## Editionen
 

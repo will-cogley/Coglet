@@ -54,9 +54,10 @@ idf.py -p <puerto> flash monitor
 Tipo de placa: **NMRobotics Coglet (CogNog V3.0 PCB)**
 (`CONFIG_BOARD_TYPE_COGNOG_V3`), archivos de la placa en
 [`main/boards/cognog-v3/`](../../../main/boards/cognog-v3). Se identifica como
-`cognog-v3`. El firmware hasta la 2.3.x usaba el tipo de placa genérico
-`bread-compact-wifi-s3cam`, que sigue existiendo para configuraciones locales
-antiguas.
+`cognog-v3` y es el único tipo de placa de este firmware (hasta la 2.3.x, Coglet
+usaba el tipo genérico de xiaozhi `bread-compact-wifi-s3cam`). El modelo de la
+palabra de activación (MultiNet), el procesamiento de audio y la imagen de
+assets están fijados para Coglet y no aparecen en menuconfig.
 
 ## Ediciones
 

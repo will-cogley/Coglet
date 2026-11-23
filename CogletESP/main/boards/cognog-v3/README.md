@@ -13,7 +13,7 @@ All GPIOs are in `config.h`; each one was checked against the V3.0 PCB netlist.
 ## Board type
 
 menuconfig: `Xiaozhi Assistant → Board Type → NMRobotics Coglet (CogNog V3.0 PCB)`
-(`CONFIG_BOARD_TYPE_COGNOG_V3`). This is the default in `sdkconfig.defaults`.
+(`CONFIG_BOARD_TYPE_COGNOG_V3`). It is the only board type in this firmware.
 
 The board reports itself as `cognog-v3` (OTA request, MCP server name,
 User-Agent). Firmware up to 2.3.x used the generic xiaozhi board type
@@ -21,9 +21,7 @@ User-Agent). Firmware up to 2.3.x used the generic xiaozhi board type
 a generic xiaozhi firmware, which the device would install automatically and
 lose every Coglet feature. A board type of its own avoids that.
 
-The old board type is still there (`bread-compact-wifi-s3cam`) so existing
-local configurations keep building. Shared Coglet code checks
-`CONFIG_COGLET_BOARD`, which is set for both.
+Shared code that only applies to Coglet checks `CONFIG_COGLET_BOARD`.
 
 ## Build
 

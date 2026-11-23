@@ -31,7 +31,6 @@ AECがオフのときは、これらは何も動きません。音声の経路�
 | `CONFIG_USE_DEVICE_AEC` | オン | AECを組み込み |
 | `CONFIG_COGLET_AEC_DEFAULT_OFF` | オン | ユーザーがオンにするまでオフ（設定キー `aec=on`） |
 | `CONFIG_COGLET_AEC_REF_DELAY_MS` | 0 | 参照信号のずれ、−10〜20 ms |
-| `CONFIG_USE_SERVER_AEC` | オフ | オフのままにします（両者は同時に使えません） |
 
 設定は起動時に1回だけ読み込まれる（`CogletSettings::DeviceAec()`）ので、切り替えると
 Cogletは再起動します。参照信号用のメモリーを確保できなかった場合、Cogletは

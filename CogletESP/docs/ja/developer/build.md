@@ -51,9 +51,10 @@ idf.py -p <ポート> flash monitor
 ボードタイプ：**NMRobotics Coglet (CogNog V3.0 PCB)**
 （`CONFIG_BOARD_TYPE_COGNOG_V3`）。ボードのファイルは
 [`main/boards/cognog-v3/`](../../../main/boards/cognog-v3) にあります。`cognog-v3`
-と名乗ります。2.3.xまでのファームウェアは汎用のボードタイプ
-`bread-compact-wifi-s3cam` を使っていました。古いローカル設定のために、こちらも
-残っています。
+と名乗り、このファームウェアで唯一のボードタイプです（2.3.xまでのCogletは、xiaozhiの
+汎用タイプ `bread-compact-wifi-s3cam` を使っていました）。ウェイクワードのモデル
+（MultiNet）、音声処理、assetsイメージはCoglet用に固定されていて、menuconfigには
+表示されません。
 
 ## エディション
 

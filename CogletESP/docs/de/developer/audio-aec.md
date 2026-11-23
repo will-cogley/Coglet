@@ -36,7 +36,6 @@ ohne AEC.
 | `CONFIG_USE_DEVICE_AEC` | an | AEC einkompiliert |
 | `CONFIG_COGLET_AEC_DEFAULT_OFF` | an | aus, bis der Nutzer es einschaltet (Einstellung `aec=on`) |
 | `CONFIG_COGLET_AEC_REF_DELAY_MS` | 0 | Referenzversatz, −10…20 ms |
-| `CONFIG_USE_SERVER_AEC` | aus | muss aus bleiben: beide schließen sich aus |
 
 Die Einstellung wird einmal beim Start gelesen (`CogletSettings::DeviceAec()`),
 daher startet Coglet beim Umschalten neu. Lässt sich die Referenz nicht

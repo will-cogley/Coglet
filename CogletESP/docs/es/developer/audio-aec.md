@@ -36,7 +36,6 @@ que en un firmware sin AEC.
 | `CONFIG_USE_DEVICE_AEC` | activada | AEC compilada |
 | `CONFIG_COGLET_AEC_DEFAULT_OFF` | activada | desactivada hasta que el usuario la activa (ajuste `aec=on`) |
 | `CONFIG_COGLET_AEC_REF_DELAY_MS` | 0 | desfase de la referencia, −10…20 ms |
-| `CONFIG_USE_SERVER_AEC` | desactivada | debe seguir desactivada: las dos se excluyen |
 
 El ajuste se lee una vez al arrancar (`CogletSettings::DeviceAec()`), así que
 cambiarlo reinicia Coglet. Si no se puede reservar la referencia, Coglet

@@ -51,8 +51,10 @@ idf.py -p <port> flash monitor
 Board type: **NMRobotics Coglet (CogNog V3.0 PCB)**
 (`CONFIG_BOARD_TYPE_COGNOG_V3`), board files in
 [`main/boards/cognog-v3/`](../../../main/boards/cognog-v3). It reports itself as
-`cognog-v3`. Firmware up to 2.3.x used the generic board type
-`bread-compact-wifi-s3cam`, which still exists for old local configurations.
+`cognog-v3` and is the only board type in this firmware (up to 2.3.x Coglet used
+the generic xiaozhi type `bread-compact-wifi-s3cam`). The wake word model
+(MultiNet), the audio processor and the assets image are fixed for Coglet and
+don't appear in menuconfig.
 
 ## Editions
 

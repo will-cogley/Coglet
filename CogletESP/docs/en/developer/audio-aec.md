@@ -36,7 +36,6 @@ without AEC.
 | `CONFIG_USE_DEVICE_AEC` | on | AEC compiled in |
 | `CONFIG_COGLET_AEC_DEFAULT_OFF` | on | off until the user enables it (settings key `aec=on`) |
 | `CONFIG_COGLET_AEC_REF_DELAY_MS` | 0 | reference offset, −10…20 ms |
-| `CONFIG_USE_SERVER_AEC` | off | must stay off: the two exclude each other |
 
 The setting is read once at boot (`CogletSettings::DeviceAec()`), so changing
 it restarts Coglet. If the reference can't be allocated, Coglet logs
