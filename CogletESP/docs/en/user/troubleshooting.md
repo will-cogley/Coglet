@@ -52,7 +52,7 @@ page are kept; songs compiled into your own build are not.
 ## Talking
 
 **Coglet doesn't wake up, or wakes up by itself.**
-In the settings, lower the wake-up sensitivity (for example 3) if it misses
+In the settings, lower the wake-up sensitivity (for example 2) if it misses
 you, or raise it (for example 10) if it wakes up by itself. Speak at a normal
 distance, facing Coglet. You can also choose another wake word.
 

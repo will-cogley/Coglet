@@ -58,7 +58,7 @@ eigenen Build kompiliert sind, nicht.
 ## Sprechen
 
 **Coglet wacht nicht auf oder wacht von selbst auf.**
-Senken Sie in den Einstellungen die Aufweckschwelle (zum Beispiel auf 3), wenn
+Senken Sie in den Einstellungen die Aufweckschwelle (zum Beispiel auf 2), wenn
 er Sie überhört, oder erhöhen Sie sie (zum Beispiel auf 10), wenn er von selbst
 aufwacht. Sprechen Sie aus normaler Entfernung und Coglet zugewandt. Sie können
 auch ein anderes Aktivierungswort wählen.

@@ -15,7 +15,7 @@ clic en **Guardar en Coglet**.
 | Ajuste | Valores |
 |---|---|
 | Palabra de activación | Palabras en inglés, p. ej. `hey coglet` o `hello robot` (de 3 a 40 letras; se permiten espacios). Dos o tres palabras bien distintas funcionan mejor |
-| Umbral de activación | De 1 a 50. Los números más bajos despiertan a Coglet con más facilidad, pero también más veces por error. Prueba con 3 si Coglet no te oye a menudo, y con 10 si se despierta solo |
+| Umbral de activación | De 1 a 50. Los números más bajos despiertan a Coglet con más facilidad, pero también más veces por error. Prueba con 2 si Coglet no te oye a menudo, y con 10 si se despierta solo |
 | Sonido de inicio | Mecha, Evil, Cat, Navidad, Duende, Muñeco de nieve |
 | Sonido de recordatorio | Mecha, Evil, Cat, Navidad, Duende, Muñeco de nieve |
 | Interrumpir a Coglet | Activado: Coglet sigue escuchando mientras habla, así que puedes interrumpirlo sin la palabra de activación |

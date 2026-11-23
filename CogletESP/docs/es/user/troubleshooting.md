@@ -53,7 +53,7 @@ añadidas en la página se conservan; las compiladas en tu propio firmware, no.
 ## Hablar
 
 **Coglet no se despierta, o se despierta solo.**
-En los ajustes, baja el umbral de activación (por ejemplo a 3) si no te oye, o
+En los ajustes, baja el umbral de activación (por ejemplo a 2) si no te oye, o
 súbelo (por ejemplo a 10) si se despierta solo. Habla a una distancia normal,
 de cara a Coglet. También puedes elegir otra palabra de activación.
 

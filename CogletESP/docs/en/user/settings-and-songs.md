@@ -14,7 +14,7 @@ Click **Show Coglet's settings**, change what you like, then **Save to Coglet**.
 | Setting | Values |
 |---|---|
 | Wake word | English words, e.g. `hey coglet` or `hello robot` (3 to 40 letters; spaces are fine). Two or three clearly different words work best |
-| Wake-up sensitivity | 1 to 50. Lower numbers wake up more easily, but also by mistake more often. Try 3 if Coglet often misses you, 10 if it wakes up by itself |
+| Wake-up sensitivity | 1 to 50. Lower numbers wake up more easily, but also by mistake more often. Try 2 if Coglet often misses you, 10 if it wakes up by itself |
 | Startup sound | Mecha, Evil, Cat, Christmas, Elf, Snowman |
 | Reminder sound | Mecha, Evil, Cat, Christmas, Elf, Snowman |
 | Talk over Coglet | On: Coglet keeps listening while it speaks, so you can interrupt it without the wake word |

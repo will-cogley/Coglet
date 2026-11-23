@@ -427,7 +427,7 @@
 
       <label for="thr"><span data-i18n="set.thr">Wake-up sensitivity:</span> <b id="thr-value"></b></label>
       <input type="range" id="thr" min="1" max="50" step="1" aria-describedby="thr-help">
-      <p class="note" id="thr-help" data-i18n="set.thrHelp">Lower numbers wake up more easily, but also by mistake more often (TV, conversations). Try 3 if Coglet often misses you, 10 if it wakes up by itself.</p>
+      <p class="note" id="thr-help" data-i18n="set.thrHelp">Lower numbers wake up more easily, but also by mistake more often (TV, conversations). Try 2 if Coglet often misses you, 10 if it wakes up by itself.</p>
 
       <label for="boot" data-i18n="set.boot">Startup sound</label>
       <select id="boot">
@@ -507,7 +507,7 @@
     <details class="faq"><summary data-i18n="faq.q8">How many songs fit, and why does a song dance oddly?</summary><divNone data-i18n="faq.a8">
       About 8 one-minute songs (2 MB); the bar above shows the room left. If the moves feel wrong for a song, change its style to <b>energetic</b> or <b>calm</b> before saving: calm songs are danced on the slow, felt beat.</div></details>
     <details class="faq"><summary data-i18n="faq.q9">Coglet doesn't wake up (or wakes up by itself)</summary><divNone data-i18n="faq.a9">
-      Under <b>Settings</b>, lower the wake-up sensitivity number (for example to 3) if Coglet often misses you, or raise it (for example to 10) if it wakes up by itself. You can also pick a different wake word there. Speak at a normal distance, facing Coglet.</div></details>
+      Under <b>Settings</b>, lower the wake-up sensitivity number (for example to 2) if Coglet often misses you, or raise it (for example to 10) if it wakes up by itself. You can also pick a different wake word there. Speak at a normal distance, facing Coglet.</div></details>
     <details class="faq"><summary data-i18n="faq.q10">After updating, Coglet says a 6-digit code</summary><divNone data-i18n="faq.a10">
       Coglet needs to be paired with xiaozhi.me again. This only happens after a fresh install.</div></details>
     <details class="faq"><summary data-i18n="faq.q11">The servo board setup can't connect</summary><divNone data-i18n="faq.a11">
@@ -1829,7 +1829,7 @@ function showThreshold() {
 function fillSettings(values) {
   const d = (settingsArea() && settingsArea().defaults) || {};
   $("ww").value = values.wake_word || d.wake_word || "hello coglet";
-  $("thr").value = values.threshold || d.threshold || 5;
+  $("thr").value = values.threshold || d.threshold || 3;
   $("boot").value = values.startup || d.startup || "mecha";
   $("rem").value = values.reminder || d.reminder || "mecha";
   $("aec").checked = (values.aec || d.aec || "off") === "on";

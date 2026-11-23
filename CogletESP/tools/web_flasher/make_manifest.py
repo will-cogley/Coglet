@@ -53,7 +53,7 @@ SETTINGS_SIZE = 4096
 
 def settings_defaults(build):
     """The firmware's own values, shown on the page when nothing was saved."""
-    out = {"wake_word": "hello coglet", "threshold": 5, "startup": "mecha", "reminder": "mecha",
+    out = {"wake_word": "hello coglet", "threshold": 3, "startup": "mecha", "reminder": "mecha",
            "custom_wake_word": True, "aec": "off", "aec_available": False}
     try:
         with open(os.path.join(build, "config", "sdkconfig.json"), encoding="utf-8") as f:

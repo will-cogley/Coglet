@@ -15,7 +15,7 @@ und klicken Sie dann auf **Auf Coglet speichern**.
 | Einstellung | Werte |
 |---|---|
 | Aktivierungswort | Englische Wörter, z. B. `hey coglet` oder `hello robot` (3 bis 40 Buchstaben; Leerzeichen sind erlaubt). Zwei oder drei deutlich verschiedene Wörter funktionieren am besten |
-| Aufweckschwelle | 1 bis 50. Niedrigere Zahlen wecken Coglet leichter, aber auch öfter versehentlich. Versuchen Sie 3, wenn Coglet Sie oft überhört, und 10, wenn er von selbst aufwacht |
+| Aufweckschwelle | 1 bis 50. Niedrigere Zahlen wecken Coglet leichter, aber auch öfter versehentlich. Versuchen Sie 2, wenn Coglet Sie oft überhört, und 10, wenn er von selbst aufwacht |
 | Startton | Mecha, Evil, Cat, Weihnachten, Elfen, Schneemann |
 | Erinnerungston | Mecha, Evil, Cat, Weihnachten, Elfen, Schneemann |
 | Coglet ins Wort fallen | Ein: Coglet hört weiter zu, während er spricht, sodass Sie ihn ohne Aktivierungswort unterbrechen können |
