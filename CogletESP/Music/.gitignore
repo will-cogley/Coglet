@@ -1,0 +1,5 @@
+# Your own songs stay on your computer: everything in this folder except
+# this file and README.md is ignored by git.
+*
+!.gitignore
+!README.md
