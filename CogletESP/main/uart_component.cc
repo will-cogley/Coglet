@@ -31,11 +31,3 @@ void uart_send_string(const char* str) {
         uart_write_bytes(UART_PORT_NUM, "\r\n", 2);
     }
 }
-
-void uart_signal_start() {
-    uart_send_string("[SPEAK_START]\n");
-}
-
-void uart_signal_stop() {
-    uart_send_string("[SPEAK_STOP]\n");
-}
