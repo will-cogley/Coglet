@@ -47,7 +47,7 @@ private:
     bool SensorPrivateIoctl(uint32_t command, void* data, size_t size, bool write);
     bool ReadSensorRegister(uint16_t reg, uint8_t& value);
     bool WriteSensorRegister(uint16_t reg, uint8_t value);
-#ifdef CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI_CAM
+#ifdef CONFIG_COGLET_BOARD
     bool ApplyCogletGc0308VendorProfile();
 #endif
 

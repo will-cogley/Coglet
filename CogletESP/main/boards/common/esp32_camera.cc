@@ -56,7 +56,7 @@
 
 #define TAG "Esp32Camera"
 
-#ifdef CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI_CAM
+#ifdef CONFIG_COGLET_BOARD
 struct Gc0308VendorReg {
     uint16_t reg;
     uint8_t value;
@@ -506,7 +506,7 @@ Esp32Camera::Esp32Camera(const esp_video_init_config_t& config) {
         return;
     }
 
-#ifdef CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI_CAM
+#ifdef CONFIG_COGLET_BOARD
     // Re-apply the exact known-good Coglet GC0308 vendor state while the
     // stream is still off. This keeps the project independent of edits under
     // managed_components while preserving the successful register sequence.
@@ -1148,7 +1148,7 @@ bool Esp32Camera::Capture() {
     return true;
 }
 
-#ifdef CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI_CAM
+#ifdef CONFIG_COGLET_BOARD
 bool Esp32Camera::ApplyCogletGc0308VendorProfile() {
     esp_cam_sensor_id_t chip_id = {};
     if (!SensorPrivateIoctl(ESP_CAM_SENSOR_IOC_G_CHIP_ID,
