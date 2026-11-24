@@ -60,7 +60,7 @@ geschrieben, sodass sich Zeilen verschiedener Tasks nie vermischen.
 | `action:shake_head` / `blink` / `left_ear` / `right_ear` / `ears` | Einmalige Bewegung aus einem MCP-Tool (drei Durchgänge) |
 | `dance:<style>` | Eingebauten Tanz starten, z. B. `dance:mecha` |
 | `dance:stop` | Jeden Tanz sofort beenden |
-| `prep:<style>` / `prep:groove-<preset>` | Das Gespräch endet für einen Tanz: Servos eingeschaltet lassen und die Startpose des Tanzes einnehmen statt zu schlafen (endet mit dem Tanzbeginn, mit `dance:stop` oder nach 15 s) |
+| `prep:<style>` / `prep:groove-<preset>` | Das Gespräch endet für einen Tanz: Servos eingeschaltet lassen und die Startpose des Tanzes einnehmen statt zu schlafen (endet mit dem Tanzbeginn, mit `dance:stop` oder nach 15 s). Nach einem Tanz hält dieselbe Logik die Schlusspose bis zu 25 s |
 | `groove:<energetic\|calm>:<bpm>` | Tanz zu einem eigenen Song starten |
 | `gb:<s><e><b>` | Ein Beat eines eigenen Songs: Akzent 0–9, Abschnittsenergie 0–9, Taktbeginn 0/1 |
 | `groove:end` | Eigener Song zu Ende |

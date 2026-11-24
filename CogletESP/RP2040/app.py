@@ -16,6 +16,7 @@ import coglet_updater
 
 ESP = UART(1, baudrate=115200, tx=Pin(4), rx=Pin(5))
 rx_buffer = b""
+RX_BUFFER_MAX = 1024
 
 # ============================================================
 # CogNog / Coglet PCB V2.0 physical controls
@@ -69,11 +70,11 @@ power_up_started_at = None
 power_up_reason = ""
 
 # These device states explicitly mean the assistant is no longer speaking.
+#   "neutral" and "thinking" are NOT here: the LLM also sends them as the
+#   emotion of a reply, which can arrive while Coglet is still speaking.
 SPEECH_STOP_SIGNALS = (
-    "neutral",
     "idle",
     "listening",
-    "thinking",
     "state_startup",
 )
 
@@ -532,6 +533,11 @@ while True:
 
         if ESP.any():
             rx_buffer += ESP.read()   # bytes + bytes = OK
+            # Protocol lines are short (the longest, an update data line, is ~530
+            # bytes): a long run without a newline is noise, drop it.
+            if len(rx_buffer) > RX_BUFFER_MAX and b"\n" not in rx_buffer:
+                print("[UART] dropped {} bytes without a line end".format(len(rx_buffer)))
+                rx_buffer = b""
             while b"\n" in rx_buffer:
                 line, rx_buffer = rx_buffer.split(b"\n", 1)
                 # A garbled byte on the link (the ESP being reset or flashed)
@@ -601,6 +607,7 @@ while True:
                         print("[DANCE] MCP action ignored while dancing:", action_name)
                         continue
                     _enable_servo_outputs("MCP action {}".format(action_name))
+                    music.end_prep("MCP action")
                     animation.start_mcp_action(action_name, now)
                     continue
 
@@ -609,6 +616,8 @@ while True:
                 # enabled until pose_sleep has settled and the release delay ends.
                 if rcvstate != "idle" and rcvstate in animation.state_map:
                     _enable_servo_outputs("state {}".format(rcvstate))
+                    # A conversation (re)starts: a held dance pose hands over.
+                    music.end_prep("state " + rcvstate)
 
                 # Speech activity and expression are two separate dimensions.
                 # "speaking" starts the mouth animation.

@@ -282,8 +282,7 @@ void Application::Alert(const char* status, const char* message, const char* emo
     ESP_LOGW(TAG, "Alert [%s] %s: %s", emotion, status, message);
     auto display = Board::GetInstance().GetDisplay();
     display->SetStatus(status);
-    display->SetEmotion(emotion);
-    uart_send_string(emotion);
+    display->SetEmotion(emotion);   // also forwards the emotion to the RP2040
     display->SetChatMessage("system", message);
     if (!sound.empty()) {
         audio_service_.PlaySound(sound);
@@ -294,7 +293,9 @@ void Application::DismissAlert() {
     if (device_state_ == kDeviceStateIdle) {
         auto display = Board::GetInstance().GetDisplay();
         display->SetStatus(Lang::Strings::STANDBY);
-        display->SetEmotion("neutral");
+        // Only "idle" for the RP2040: SetEmotion("neutral") would forward
+        // "neutral", which powers the servos up. This runs on every MQTT
+        // reconnect, also while Coglet is asleep.
         uart_send_string("idle");
         display->SetChatMessage("system", "");
     }
@@ -557,8 +558,7 @@ void Application::Start() {
             auto emotion = cJSON_GetObjectItem(root, "emotion");
             if (cJSON_IsString(emotion)) {
                 Schedule([this, display, emotion_str = std::string(emotion->valuestring)]() {
-                    display->SetEmotion(emotion_str.c_str());
-                    uart_send_string(emotion_str.c_str());
+                    display->SetEmotion(emotion_str.c_str());   // forwards it to the RP2040
                 });
             }
         } else if (strcmp(type->valuestring, "mcp") == 0) {
@@ -1375,7 +1375,8 @@ void Application::SetDeviceState(DeviceState state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
             display->SetStatus(Lang::Strings::STANDBY);
-            display->SetEmotion("neutral");
+            // No SetEmotion("neutral") here: it would forward "neutral" to
+            // the RP2040 (servos power up) right before "idle" (sleep).
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
             uart_send_string("idle");

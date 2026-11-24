@@ -57,7 +57,7 @@ lines from different tasks never interleave.
 | `action:shake_head` / `blink` / `left_ear` / `right_ear` / `ears` | One-shot move from an MCP tool (three cycles) |
 | `dance:<style>` | Start a built-in dance, e.g. `dance:mecha` |
 | `dance:stop` | Stop any dance now |
-| `prep:<style>` / `prep:groove-<preset>` | The conversation is closing for a dance: keep the servos powered and move to the dance's start pose instead of sleeping (ends when the dance starts, on `dance:stop`, or after 15 s) |
+| `prep:<style>` / `prep:groove-<preset>` | The conversation is closing for a dance: keep the servos powered and move to the dance's start pose instead of sleeping (ends when the dance starts, on `dance:stop`, or after 15 s). The same hold keeps the final pose for up to 25 s after a dance finishes |
 | `groove:<energetic\|calm>:<bpm>` | Start dancing to a custom song |
 | `gb:<s><e><b>` | One beat of a custom song: accent 0–9, section energy 0–9, bar start 0/1 |
 | `groove:end` | Custom song finished |

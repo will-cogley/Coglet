@@ -39,7 +39,10 @@ Mientras un servo está apagado, su posición en el programa queda congelada.
 Al encenderse de nuevo, parte de donde se detuvo físicamente y va a su nuevo
 destino a su velocidad normal, en lugar de saltar hasta allí. Antes de un
 baile los servos ni siquiera se apagan (`prep:`, consulta
-[Arquitectura](architecture.md#protocolo-uart-esp--rp2040)).
+[Arquitectura](architecture.md#protocolo-uart-esp--rp2040)). Cuando un baile
+termina solo, los servos siguen encendidos y mantienen la pose final hasta el
+siguiente estado (por ejemplo, la conversación posterior) o 25 s como máximo;
+después Coglet se duerme como siempre.
 
 Registro: `[POWER] staggered power-up (...)`, `[POWER] all servos on after ... ms`.
 

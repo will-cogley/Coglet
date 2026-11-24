@@ -265,6 +265,10 @@ _dance = {
 
 # Start pose held between "prep:" and the dance itself (servos stay powered).
 PREP_TIMEOUT_MS = 15000
+# After a dance finishes, the final pose is held (servos powered) until the
+# next state from the ESP (normally the follow-up "how was it?" session),
+# instead of going to sleep and waking up again a second later.
+HOLD_AFTER_DANCE_MS = 25000
 _prep = {"until": None}
 
 
@@ -304,6 +308,14 @@ def _clear_prep(reason):
         return
     _prep["until"] = None
     print("[DANCE] PREPARE ended ({})".format(reason))
+
+
+def end_prep(reason):
+    """A new state from the ESP takes over the servos (start pose or the
+    hold after a dance ends; the state's own pose is applied next)."""
+    if prepared():
+        _clear_prep(reason)
+        animation.new_state_flag = True
 
 
 def keeps_released(name):
@@ -390,6 +402,10 @@ def stop(now, reason="stop"):
     # XiaoZhi state re-apply its pose on the next loop.
     animation.reset_servo_motion_defaults()
     animation.new_state_flag = True
+    if reason in ("finished", "song finished"):
+        # Keep the final pose powered until the next state arrives.
+        _prep["until"] = time.ticks_add(now, HOLD_AFTER_DANCE_MS)
+        print("[DANCE] holding the final pose until the next state")
 
 
 def _music_time(now):
@@ -691,7 +707,7 @@ def _update_groove(now):
     if _dance["end_at"] is not None:
         if time.ticks_diff(now, _dance["end_at"]) >= 0:
             stop(now, "song finished")
-            return False
+            return prepared()           # holding the final pose
     elif time.ticks_diff(now, _dance["last_beat_ms"]) > GROOVE_SILENCE_MS:
         groove_end(now)                 # ESP went quiet: finish gracefully
     return True
@@ -725,7 +741,7 @@ def update(now):
             _dance["end_at"] = time.ticks_add(now, END_HOLD_MS)
         elif time.ticks_diff(now, _dance["end_at"]) >= 0 and t >= _dance["duration_ms"]:
             stop(now, "finished")
-            return False
+            return prepared()           # holding the final pose
     elif t > _dance["duration_ms"] + 3000:
         stop(now, "timeout")
         return False

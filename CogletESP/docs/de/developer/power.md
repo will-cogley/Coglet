@@ -39,7 +39,10 @@ Solange ein Servo ausgeschaltet ist, bleibt seine Position im Programm
 eingefroren. Wird er wieder eingeschaltet, startet er dort, wo er tatsächlich
 stehen geblieben ist, und fährt mit seiner normalen Geschwindigkeit zum neuen
 Ziel, statt dorthin zu springen. Vor einem Tanz werden die Servos gar nicht
-erst ausgeschaltet (`prep:`, siehe [Architektur](architecture.md#uart-protokoll-esp--rp2040)).
+erst ausgeschaltet (`prep:`, siehe [Architektur](architecture.md#uart-protokoll-esp--rp2040)). Endet ein Tanz von
+selbst, bleiben die Servos eingeschaltet und halten die Schlusspose bis zum
+nächsten Zustand (zum Beispiel dem Anschlussgespräch) oder höchstens 25 s; danach
+schläft Coglet wie gewohnt ein.
 
 Log: `[POWER] staggered power-up (...)`, `[POWER] all servos on after ... ms`.
 

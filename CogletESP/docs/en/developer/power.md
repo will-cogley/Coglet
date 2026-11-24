@@ -36,7 +36,10 @@ While a servo is switched off, its position in the program is frozen. When it
 is switched on again it starts from where it physically stopped and moves to
 its new target at its normal speed, instead of jumping there. Before a dance
 the servos are not switched off at all (`prep:`, see
-[Architecture](architecture.md#uart-protocol-esp--rp2040)).
+[Architecture](architecture.md#uart-protocol-esp--rp2040)). After a dance ends
+on its own, the servos stay on and hold the final pose until the next state
+(for example the follow-up conversation) or for at most 25 s, then Coglet goes
+to sleep as usual.
 
 Log: `[POWER] staggered power-up (...)`, `[POWER] all servos on after ... ms`.
 

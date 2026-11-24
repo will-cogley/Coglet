@@ -59,7 +59,7 @@ llamada, así que las líneas de distintas tareas nunca se mezclan.
 | `action:shake_head` / `blink` / `left_ear` / `right_ear` / `ears` | Movimiento único desde una herramienta MCP (tres ciclos) |
 | `dance:<style>` | Empezar un baile incluido, p. ej. `dance:mecha` |
 | `dance:stop` | Detener cualquier baile ya |
-| `prep:<style>` / `prep:groove-<preset>` | La conversación se cierra para bailar: mantener los servos encendidos e ir a la pose inicial del baile en lugar de dormir (termina al empezar el baile, con `dance:stop` o a los 15 s) |
+| `prep:<style>` / `prep:groove-<preset>` | La conversación se cierra para bailar: mantener los servos encendidos e ir a la pose inicial del baile en lugar de dormir (termina al empezar el baile, con `dance:stop` o a los 15 s). Tras un baile, lo mismo mantiene la pose final hasta 25 s |
 | `groove:<energetic\|calm>:<bpm>` | Empezar a bailar una canción propia |
 | `gb:<s><e><b>` | Un pulso de una canción propia: acento 0–9, energía de la sección 0–9, inicio de compás 0/1 |
 | `groove:end` | Fin de la canción propia |
