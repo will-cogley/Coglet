@@ -107,6 +107,13 @@
   .hidden { display: none !important; }
   code { background: var(--code); padding: 1px 5px; border-radius: 5px; font-size: 0.9em; }
   a { color: var(--accent); }
+  .foot { border-top: 1px solid var(--line); margin-top: 32px; padding-top: 16px; color: var(--muted); }
+  .foot p { margin: 0; }
+  /* Handwritten-style signature from fonts the system already has (no download). */
+  .foot .sign {
+    margin-top: 6px; text-align: right; color: var(--ink); font-size: 1.7rem; font-weight: 400; line-height: 1.3;
+    font-family: "Snell Roundhand", "Segoe Script", "Apple Chancery", "Brush Script MT", "Dancing Script", cursive;
+  }
   .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
   .skip { position: absolute; left: 16px; top: -60px; background: var(--card); padding: 8px 12px; border-radius: 8px; z-index: 10; }
   .skip:focus { top: 12px; }
@@ -490,31 +497,36 @@
 
   <section class="card" aria-labelledby="faq-h">
     <h2 id="faq-h" data-i18n="faq.h">Questions and problems</h2>
-    <details class="faq"><summary data-i18n="faq.q1">Coglet isn't in the list of ports</summary><divNone data-i18n="faq.a1">
+    <details class="faq"><summary data-i18n="faq.q1">Coglet isn't in the list of ports</summary><div data-i18n="faq.a1">
       Try another USB cable (many cables only charge), another USB port on the computer, and make sure you use Coglet's <b>top</b> USB-C port with the switch on <b>ESP</b>. On Windows the USB driver installs by itself the first time; give it a minute. If it still doesn't show up, tick <b>Show all ports</b> under Advanced options.</div></details>
-    <details class="faq"><summary data-i18n="faq.q2">There are several ports in the list. Which one is Coglet?</summary><divNone data-i18n="faq.a2">
+    <details class="faq"><summary data-i18n="faq.q2">There are several ports in the list. Which one is Coglet?</summary><div data-i18n="faq.a2">
       Unplug Coglet and connect again: the entry that disappeared is Coglet. Usually it's called "USB Serial", "CH340/CH343", "CP210x" or "USB JTAG/serial". The page remembers your choice.</div></details>
-    <details class="faq"><summary data-i18n="faq.q3">"Failed to connect"</summary><divNone data-i18n="faq.a3">
+    <details class="faq"><summary data-i18n="faq.q3">"Failed to connect"</summary><div data-i18n="faq.a3">
       Close anything else that may be using the port (Thonny, the Arduino IDE, another tab with this page), then try again. If it still fails, hold the <b>BOOT</b> button, press and release <b>RESET</b>, release <b>BOOT</b>, and click Connect &amp; Update. A slower upload speed under Advanced options can help too.</div></details>
-    <details class="faq"><summary data-i18n="faq.q4">What if the update stops halfway, or I unplug Coglet by accident?</summary><divNone data-i18n="faq.a4">
+    <details class="faq"><summary data-i18n="faq.q4">What if the update stops halfway, or I unplug Coglet by accident?</summary><div data-i18n="faq.a4">
       Nothing breaks for good: plug Coglet back in and run the update again. If the servo board was being updated when the power went off, Coglet finishes or repeats that by itself the next time it starts.</div></details>
-    <details class="faq"><summary data-i18n="faq.q5">Do I have to open Coglet to reach the switch?</summary><divNone data-i18n="faq.a5">
+    <details class="faq"><summary data-i18n="faq.q5">Do I have to open Coglet to reach the switch?</summary><div data-i18n="faq.a5">
       Only for the one-time servo board setup, and only on Coglets made before November 2026. Normal updates use the ESP position, as Coglet comes. If you'd rather not open it, you can still update: everything works except new servo moves, which need that one step.</div></details>
     <details class="faq"><summary data-i18n="faq.q6">What's new in this version?</summary><div id="whatsnew" data-i18n="faq.a6">
       See the release notes on GitHub.</div></details>
-    <details class="faq"><summary data-i18n="faq.q7">I build my own firmware. Will this page overwrite it?</summary><divNone data-i18n="faq.a7">
+    <details class="faq"><summary data-i18n="faq.q7">I build my own firmware. Will this page overwrite it?</summary><div data-i18n="faq.a7">
       Yes: <b>Connect &amp; Update</b> installs the official firmware. Songs in your <code>Music</code> folder are compiled into your own build, so they are replaced too; the files on your computer are not touched, and rebuilding brings them back. Songs added on this page are stored separately and kept. To keep your own changes, merge the new version into your code and build it yourself.</div></details>
-    <details class="faq"><summary data-i18n="faq.q8">How many songs fit, and why does a song dance oddly?</summary><divNone data-i18n="faq.a8">
+    <details class="faq"><summary data-i18n="faq.q8">How many songs fit, and why does a song dance oddly?</summary><div data-i18n="faq.a8">
       About 8 one-minute songs (2 MB); the bar above shows the room left. If the moves feel wrong for a song, change its style to <b>energetic</b> or <b>calm</b> before saving: calm songs are danced on the slow, felt beat.</div></details>
-    <details class="faq"><summary data-i18n="faq.q9">Coglet doesn't wake up (or wakes up by itself)</summary><divNone data-i18n="faq.a9">
+    <details class="faq"><summary data-i18n="faq.q9">Coglet doesn't wake up (or wakes up by itself)</summary><div data-i18n="faq.a9">
       Under <b>Settings</b>, lower the wake-up sensitivity number (for example to 2) if Coglet often misses you, or raise it (for example to 10) if it wakes up by itself. You can also pick a different wake word there. Speak at a normal distance, facing Coglet.</div></details>
-    <details class="faq"><summary data-i18n="faq.q10">After updating, Coglet says a 6-digit code</summary><divNone data-i18n="faq.a10">
+    <details class="faq"><summary data-i18n="faq.q10">After updating, Coglet says a 6-digit code</summary><div data-i18n="faq.a10">
       Coglet needs to be paired with xiaozhi.me again. This only happens after a fresh install.</div></details>
-    <details class="faq"><summary data-i18n="faq.q11">The servo board setup can't connect</summary><divNone data-i18n="faq.a11">
-      Make sure the switch is on <b>RP2040</b> and that nothing else (Thonny, another tab) has the port open. If the board never had MicroPython installed, ask in the community for the starter firmware first.</div></details>
-    <details class="faq"><summary data-i18n="faq.q12">Asking for help</summary><divNone data-i18n="faq.a12">
-      Click <b>Show device log</b>, make the problem happen, then click <b>Copy log</b> and post it in the community. After an update the log opens by itself.</div></details>
+    <details class="faq"><summary data-i18n="faq.q11">The servo board setup can't connect</summary><div data-i18n="faq.a11">
+      Make sure the switch is on <b>RP2040</b> and that nothing else (Thonny, another tab) has the port open. If the board never had MicroPython installed, ask in our <a href='https://discord.gg/yxYdBfjSCu' target='_blank' rel='noopener'>Discord community</a> for the starter firmware first.</div></details>
+    <details class="faq"><summary data-i18n="faq.q12">Asking for help</summary><div data-i18n="faq.a12">
+      Click <b>Show device log</b>, make the problem happen, then click <b>Copy log</b> and post it in our <a href='https://discord.gg/yxYdBfjSCu' target='_blank' rel='noopener'>Discord community</a>. After an update the log opens by itself.</div></details>
   </section>
+
+  <footer class="foot">
+    <p data-i18n="foot.help">Having trouble? Join our <a href='https://discord.gg/yxYdBfjSCu' target='_blank' rel='noopener'>Discord community</a> and ask for <b>Tembin Li</b> 🌝</p>
+    <p class="sign" lang="en">Yours, Tembin</p>
+  </footer>
 </main>
 
 <script>
