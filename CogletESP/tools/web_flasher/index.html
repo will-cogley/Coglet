@@ -26,13 +26,13 @@
     :root:not([data-theme="light"]) {
       --bg: #141416; --card: #1e1e21; --ink: #ececee; --muted: #a2a4a8; --line: #3a3a40;
       --accent: #5b8ff0; --accent-ink: #0d0d0f; --ok: #4cc27d; --warn: #e3a344; --err: #ef6a6a;
-      --code: #26262a; --focus: #8fb3ff; --attention: #2e2717;
+      --code: #26262a; --focus: #8fb3ff; --attention: #2e2717; --glow-o: 0.4;
     }
   }
   :root[data-theme="dark"] {
     --bg: #141416; --card: #1e1e21; --ink: #ececee; --muted: #a2a4a8; --line: #3a3a40;
     --accent: #5b8ff0; --accent-ink: #0d0d0f; --ok: #4cc27d; --warn: #e3a344; --err: #ef6a6a;
-    --code: #26262a; --focus: #8fb3ff; --attention: #2e2717;
+    --code: #26262a; --focus: #8fb3ff; --attention: #2e2717; --glow-o: 0.4;
   }
   /* ---- Christmas look: December 1 to January 6 (see the script below) ---- */
   :root[data-season="christmas"] {
@@ -52,6 +52,30 @@
     --accent: #ec7a7f; --accent-ink: #1b0b0c; --focus: #f1c76b; --code: #1d2c2f;
     --attention: #2c2615; --gold: #e2b85c; --pine: #66c495;
   }
+  /* ---- soft colour glow behind the page (Appearance → Background) ---- */
+  :root {
+    --glow-o: 0.34;
+    --g1: #5b8ff0; --g2: #9b6ef0; --g3: #3fc1d9; --g4: #c58cf2; --g5: #5b8ff0; --g6: #46b4e8;
+  }
+  :root[data-bg="sunset"] { --g1: #ff8a5c; --g2: #ff5fa2; --g3: #ffc857; --g4: #b56cf0; --g5: #ff7a7a; --g6: #ffb347; }
+  :root[data-bg="mint"] { --g1: #3fd1a0; --g2: #3fc1d9; --g3: #9be27a; --g4: #5b8ff0; --g5: #2fbf8f; --g6: #7ad8c8; }
+  :root[data-bg="rainbow"] { --g1: #ff4d4d; --g2: #ff9f2e; --g3: #ffe14d; --g4: #3ccf6e; --g5: #4f74ff; --g6: #b45ee0; }
+  body::before {
+    content: ""; position: fixed; inset: -12vmax; z-index: 0; pointer-events: none; opacity: var(--glow-o);
+    background:
+      radial-gradient(34vmax 34vmax at 12% 10%, var(--g1), transparent 70%),
+      radial-gradient(30vmax 30vmax at 50% 2%, var(--g2), transparent 70%),
+      radial-gradient(34vmax 34vmax at 90% 12%, var(--g3), transparent 70%),
+      radial-gradient(34vmax 34vmax at 88% 88%, var(--g4), transparent 70%),
+      radial-gradient(30vmax 30vmax at 50% 98%, var(--g5), transparent 70%),
+      radial-gradient(34vmax 34vmax at 10% 88%, var(--g6), transparent 70%);
+    animation: drift 50s ease-in-out infinite alternate;
+  }
+  @keyframes drift { from { transform: translate(-1.5vmax, -1vmax) rotate(-3deg); } to { transform: translate(1.5vmax, 1vmax) rotate(3deg); } }
+  :root[data-bg="plain"] body::before, :root[data-season="christmas"] body::before { display: none; }
+  :root[data-season="christmas"] .bgpick { display: none; }
+  main { position: relative; z-index: 1; }
+  @media (prefers-reduced-motion: reduce) { body::before { animation: none; } }
   :root { color-scheme: light dark; }
   :root[data-theme="light"] { color-scheme: light; }
   :root[data-theme="dark"] { color-scheme: dark; }
@@ -95,6 +119,11 @@
     max-height: 280px; overflow: auto; font: 0.8rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     white-space: pre-wrap; word-break: break-all;
   }
+  /* device log colours: E red, W yellow, I green, debug grey (text, not colour alone, says the level) */
+  #log .l-err { color: var(--err); font-weight: 600; }
+  #log .l-warn { color: var(--warn); }
+  #log .l-ok { color: var(--ok); }
+  #log .l-dim { color: var(--muted); }
   label.check { display: flex; gap: 10px; align-items: flex-start; margin: 10px 0; }
   label.check input { width: 20px; height: 20px; margin-top: 2px; flex: none; }
   select, input[type="text"] {
@@ -124,6 +153,33 @@
   .fields label { font-weight: 600; margin-top: 10px; }
   .fields .note { margin: 2px 0 0; }
   input[type="range"] { width: 100%; min-height: 32px; accent-color: var(--accent); }
+  /* wake-up sensitivity slider: colour zones from "very easy" (left) to "are you sure?" (right) */
+  .thr-wrap { --thumb: 26px; position: relative; padding-bottom: 22px; }
+  #thr {
+    -webkit-appearance: none; appearance: none; display: block; height: 34px; margin: 0; background: transparent; cursor: pointer;
+    --zones: linear-gradient(90deg, #2fbf71 0%, #35b7a4 9%, #4f8ff0 28%, #8e6cf0 55%, #e3a344 72%, #e5534b 100%);
+  }
+  #thr::-webkit-slider-runnable-track { height: 10px; border-radius: 999px; background: var(--zones); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12); }
+  #thr::-moz-range-track { height: 10px; border-radius: 999px; background: var(--zones); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12); }
+  #thr::-webkit-slider-thumb {
+    -webkit-appearance: none; width: var(--thumb); height: var(--thumb); margin-top: -8px; border-radius: 50%;
+    background: #fff; border: 3px solid var(--accent); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); transition: transform 0.15s;
+  }
+  #thr::-moz-range-thumb {
+    width: 20px; height: 20px; border-radius: 50%; background: #fff; border: 3px solid var(--accent);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); transition: transform 0.15s;
+  }
+  #thr:hover::-webkit-slider-thumb, #thr:active::-webkit-slider-thumb { transform: scale(1.15); }
+  #thr:hover::-moz-range-thumb, #thr:active::-moz-range-thumb { transform: scale(1.15); }
+  #thr:disabled { cursor: not-allowed; opacity: 0.5; }
+  .thr-ticks { position: absolute; left: calc(var(--thumb) / 2); right: calc(var(--thumb) / 2); bottom: 0; height: 22px; }
+  .thr-ticks span { position: absolute; left: var(--at); transform: translateX(-50%); font-size: 0.95rem; line-height: 22px; opacity: 0.45; filter: grayscale(1); transition: opacity 0.2s, filter 0.2s; }
+  .thr-ticks span.on { opacity: 1; filter: none; }
+  .thr-emoji { display: inline-block; font-size: 1.3em; line-height: 1; vertical-align: -0.12em; }
+  .thr-emoji.pop { animation: pop 0.35s ease-out; }
+  @keyframes pop { 0% { transform: scale(0.5); } 60% { transform: scale(1.3); } 100% { transform: scale(1); } }
+  #thr-label.sure #thr-value { color: var(--err); }
+  @media (prefers-reduced-motion: reduce) { .thr-emoji.pop { animation: none; } }
   fieldset.editions { border: 1px solid var(--line); border-radius: 10px; margin: 16px 0 0; padding: 6px 14px 10px; }
   fieldset.editions legend { font-weight: 600; padding: 0 4px; }
   fieldset.editions .note { margin: 4px 0 0; }
@@ -251,6 +307,17 @@
   }
   apply();
   setInterval(function () { if (choice === "daynight") apply(); }, 60000);
+  var bg = null;
+  try { bg = localStorage.getItem("coglet.bg"); } catch (e) {}
+  if (bg && bg !== "glow") document.documentElement.setAttribute("data-bg", bg);
+  window.__bg = {
+    get: function () { return bg || "glow"; },
+    set: function (v) {
+      bg = v; try { localStorage.setItem("coglet.bg", v); } catch (e) {}
+      if (v === "glow") document.documentElement.removeAttribute("data-bg");
+      else document.documentElement.setAttribute("data-bg", v);
+    },
+  };
   window.__theme = {
     get: function () { return choice || "system"; },
     set: function (v) { choice = v; try { localStorage.setItem("coglet.theme", v); } catch (e) {} apply(); },
@@ -305,6 +372,14 @@
           <option value="light" data-i18n="theme.light">Light</option>
           <option value="dark" data-i18n="theme.dark">Dark</option>
           <option value="daynight" data-i18n="theme.daynight">Day and night (light 7:00–19:00)</option>
+        </select></label>
+      <label class="theme bgpick"><span data-i18n="prefs.background">Background</span>
+        <select id="bg">
+          <option value="glow" data-i18n="bg.glow">Soft glow</option>
+          <option value="sunset" data-i18n="bg.sunset">Sunset</option>
+          <option value="mint" data-i18n="bg.mint">Mint</option>
+          <option value="rainbow" data-i18n="bg.rainbow">🌈 Rainbow</option>
+          <option value="plain" data-i18n="bg.plain">Plain</option>
         </select></label>
     </div>
   </div>
@@ -432,8 +507,11 @@
       <input type="text" id="ww" maxlength="40" autocomplete="off" spellcheck="false" aria-describedby="ww-help">
       <p class="note" id="ww-help" data-i18n="set.wwHelp">English words, for example <i>hey coglet</i> or <i>hello robot</i>. Two or three distinct words work best. <i>hello coglet</i> also understands several accents.</p>
 
-      <label for="thr"><span data-i18n="set.thr">Wake-up sensitivity:</span> <b id="thr-value"></b></label>
-      <input type="range" id="thr" min="1" max="50" step="1" aria-describedby="thr-help">
+      <label for="thr" id="thr-label"><span data-i18n="set.thr">Wake-up sensitivity:</span> <b id="thr-value"></b> <span id="thr-emoji" class="thr-emoji" aria-hidden="true"></span></label>
+      <div class="thr-wrap">
+        <input type="range" id="thr" min="1" max="50" step="1" aria-describedby="thr-help">
+        <div class="thr-ticks" aria-hidden="true"><span style="--at:2%">🐹</span><span style="--at:9.2%">😉</span><span style="--at:27.6%">🌝</span><span style="--at:55.1%">😯</span><span style="--at:85.7%">😱</span></div>
+      </div>
       <p class="note" id="thr-help" data-i18n="set.thrHelp">Lower numbers wake up more easily, but also by mistake more often (TV, conversations). Try 2 if Coglet often misses you, 10 if it wakes up by itself.</p>
 
       <label for="boot" data-i18n="set.boot">Startup sound</label>
@@ -544,6 +622,9 @@ document.getElementById("version").textContent = CogletI18n.t("fw.loading");
   var sel = document.getElementById("theme");
   sel.value = window.__theme.get();
   sel.addEventListener("change", function () { window.__theme.set(sel.value); });
+  var bgSel = document.getElementById("bg");
+  bgSel.value = window.__bg.get();
+  bgSel.addEventListener("change", function () { window.__bg.set(bgSel.value); });
 })();
 (function () {
   // ---- Christmas decorations, all drawn here (no image files) ----
@@ -759,10 +840,42 @@ let monitorReader = null;
 const supported = !!navigator.serial && window.isSecureContext;
 
 // ------------------------------------------------------------------ helpers
-function log(line) {
-  logEl.textContent += line + "\n";
+// The device log, one <span> per line, coloured by its level: ESP-IDF lines
+// start with "E (", "W (", "I (", "D (" or "V ("; the page's own lines and
+// RP2040 messages are matched by their words. Copy log still gets plain text.
+const LOG_MAX = 400000, LOG_KEEP = 300000;
+let logLine = null, logLen = 0;
+function logClass(text) {
+  const m = /^\s*([EWIDV]) \(\d+\)/.exec(text);
+  if (m) return { E: "l-err", W: "l-warn", I: "l-ok", D: "l-dim", V: "l-dim" }[m[1]];
+  if (/^\s*(?:-{4,}|={4,})/.test(text)) return "l-dim";
+  if (/^\s*(?:(?:rp2040 |songs )?error\b|Traceback\b|A fatal error)|\b\w*Error: |\[ERROR\]/i.test(text)) return "l-err";
+  if (/^\s*(?:warning\b|⚠)|\bfailed\b|\[WARN/i.test(text)) return "l-warn";
+  if (/^\s*(?:done\b|✓|connected: |RP2040 connected|RP2040 set up|Hash of data verified)/i.test(text)) return "l-ok";
+  return "";
+}
+function logWrite(text) {
+  if (!text) return;
+  const parts = text.split("\n");
+  parts.forEach((part, i) => {
+    if (!logLine) { logLine = document.createElement("span"); logEl.appendChild(logLine); }
+    if (part) {
+      logLine.appendChild(document.createTextNode(part));
+      logLine.className = logClass(logLine.textContent);
+    }
+    if (i < parts.length - 1) { logLine.appendChild(document.createTextNode("\n")); logLine = null; }
+  });
+  logLen += text.length;
+  if (logLen > LOG_MAX) {
+    while (logLen > LOG_KEEP && logEl.firstChild && logEl.firstChild !== logLine) {
+      logLen -= logEl.firstChild.textContent.length;
+      logEl.removeChild(logEl.firstChild);
+    }
+  }
   logEl.scrollTop = logEl.scrollHeight;
 }
+function logClear() { logEl.textContent = ""; logLine = null; logLen = 0; }
+function log(line) { logWrite(line + "\n"); }
 // Errors are also announced at once to screen readers, and start with
 // "Error:" so they never depend on colour alone.
 function setStatus(el, text, kind = "") {
@@ -1042,7 +1155,7 @@ async function startMonitor(port, reset) {
   } catch (e) {}
   monitorBtn.textContent = t("log.stop");
   $("logbox").open = true;
-  logEl.textContent += "\n---------------- Coglet log ----------------\n";
+  logWrite("\n---------------- Coglet log ----------------\n");
   lineBuf = "";
   const decoder = new TextDecoder();
   const reader = monitorPort.readable.getReader();
@@ -1053,9 +1166,7 @@ async function startMonitor(port, reset) {
         const { value, done } = await reader.read();
         if (done) break;
         const text = decoder.decode(value, { stream: true }).replace(/\x1b\[[0-9;]*m/g, "");
-        logEl.textContent += text;
-        if (logEl.textContent.length > 400000) logEl.textContent = logEl.textContent.slice(-300000);
-        logEl.scrollTop = logEl.scrollHeight;
+        logWrite(text);
         feedLines(text);
       }
     } catch (e) {
@@ -1114,7 +1225,7 @@ function showServoBoardNeeded() {
 }
 
 // ------------------------------------------------------------------ ESP connection
-const terminal = { clean() {}, writeLine: (d) => log(d), write: (d) => { logEl.textContent += d; } };
+const terminal = { clean() {}, writeLine: (d) => log(d), write: (d) => logWrite(d) };
 
 async function connectEsp(say, baud) {
   await stopMonitor();
@@ -1172,7 +1283,7 @@ flashBtn.addEventListener("click", async () => {
   if (!manifest || busyNow) return;
   const erase = $("erase").checked;
   busy(true);
-  logEl.textContent = "";
+  logClear();
   $("progress").classList.add("hidden");
   let conn = null;
   try {
@@ -1239,7 +1350,7 @@ monitorBtn.addEventListener("click", async () => {
   if (monitorPort) { await stopMonitor(); return; }
   try {
     const port = await getPort("esp");
-    logEl.textContent = "";
+    logClear();
     await startMonitor(port, false);
     status(t("log.showing"));
   } catch (e) {
@@ -1307,7 +1418,7 @@ const fwCheckBtn = $("fwcheck");
 fwCheckBtn.addEventListener("click", async () => {
   if (!manifest || busyNow) return;
   busy(true);
-  logEl.textContent = "";
+  logClear();
   fwInstalled("");
   fwServo("");
   let conn = null;
@@ -1502,7 +1613,7 @@ rpCheckBtn.addEventListener("click", async () => {
   try {
     rpStatus(t("rp.chooseCheck"));
     const port = await getPort("esp");
-    logEl.textContent = "";
+    logClear();
     rpStatus(t("rp.checking"));
     const w = watchServoBoard((t, k) => {
       rpStatus(t, k);
@@ -1834,9 +1945,22 @@ $("songsave").addEventListener("click", async () => {
 // ------------------------------------------------------------------ settings
 const settingsStatus = (t, k) => setStatus($("setstatus"), t, k);
 function settingsArea() { return manifest && manifest.settings; }
+// Wake-up sensitivity bands: [up to, text, emoji]; lower numbers wake up more easily.
+const THR_BANDS = [[3, "set.thrVeryEasy", "🐹"], [8, "set.thrEasy", "😉"], [20, "set.thrNormal", "🌝"],
+                   [35, "set.thrHard", "😯"], [50, "set.thrSure", "😱"]];
 function showThreshold() {
-  const v = +$("thr").value;
-  $("thr-value").textContent = I18n.num(v) + " " + t(v <= 3 ? "set.thrVeryEasy" : v <= 8 ? "set.thrEasy" : v <= 20 ? "set.thrNormal" : "set.thrHard");
+  const el = $("thr"), v = +el.value;
+  const i = Math.max(0, THR_BANDS.findIndex((b) => v <= b[0]));
+  const text = I18n.num(v) + " " + t(THR_BANDS[i][1]);
+  $("thr-value").textContent = text;
+  el.setAttribute("aria-valuetext", text);
+  const emoji = $("thr-emoji");
+  if (emoji.textContent !== THR_BANDS[i][2]) {
+    emoji.textContent = THR_BANDS[i][2];
+    emoji.classList.remove("pop"); void emoji.offsetWidth; emoji.classList.add("pop");
+  }
+  document.querySelectorAll(".thr-ticks span").forEach((s, k) => s.classList.toggle("on", k === i));
+  $("thr-label").classList.toggle("sure", i === THR_BANDS.length - 1);
 }
 function fillSettings(values) {
   const d = (settingsArea() && settingsArea().defaults) || {};
