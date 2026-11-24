@@ -280,6 +280,15 @@ class Servo:
         if not self.enabled:
             return
 
+        # A released servo has no torque and stays where it is, so its
+        # position must not move on either: when it is switched on again,
+        # hold() drives it from where it physically stopped, and the normal
+        # speed/acceleration limits take it to the new target. (Advancing
+        # pos while released made servos snap to the new pose on power-up.)
+        if self.released:
+            self.vel = 0.0
+            return
+
         if dt <= 0:
             return
 
@@ -361,7 +370,8 @@ class Servo:
             _pca.full_off(self.channel)
 
     def hold(self):
-        """Undo release(): drive the servo again at its current position."""
+        """Undo release(): drive the servo again at its current position
+        (frozen while released, so this is where it physically stopped)."""
         if self.released:
             self.released = False
             self.vel = 0.0

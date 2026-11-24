@@ -97,7 +97,8 @@ ESP（`main/application.cc`）：
 ```
 self.coglet.dance(style)
   WaitAck   1行の返事を待つ（TTS終了、音声が無音。最大10〜20秒）
-  Starting  音声チャンネルを閉じる → idle
+  Starting  "prep:<style>"（RP2040はサーボの電源を入れたまま開始姿勢へ）、
+            音声チャンネルを閉じる → idle
   Playing   内蔵：  "dance:<style>"。タスクが曲を再生
             自分の曲："groove:<preset>:<bpm>"。タスクが曲を再生し、別のタスクが
                       毎拍 "gb:<strength><energy><bar>" を送り、最後に "groove:end"

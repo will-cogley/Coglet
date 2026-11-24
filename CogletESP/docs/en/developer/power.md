@@ -32,6 +32,12 @@ YAW → PIT → ROL → LID → MOU → EAL → EAR → EYL → EYR
 The sequence doesn't block the main loop. If torque is released before it
 finishes, it is cancelled. A calm custom song keeps LID, EYL and EYR off.
 
+While a servo is switched off, its position in the program is frozen. When it
+is switched on again it starts from where it physically stopped and moves to
+its new target at its normal speed, instead of jumping there. Before a dance
+the servos are not switched off at all (`prep:`, see
+[Architecture](architecture.md#uart-protocol-esp--rp2040)).
+
 Log: `[POWER] staggered power-up (...)`, `[POWER] all servos on after ... ms`.
 
 ## Standby

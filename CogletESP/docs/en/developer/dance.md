@@ -99,7 +99,8 @@ ESP (`main/application.cc`):
 ```
 self.coglet.dance(style)
   WaitAck   wait for the one-line reply (TTS stopped, audio idle; 10–20 s max)
-  Starting  close the audio channel → idle
+  Starting  "prep:<style>" (RP2040 keeps the servos on, goes to the start pose),
+            close the audio channel → idle
   Playing   built-in: "dance:<style>", a task plays the track
             custom:   "groove:<preset>:<bpm>", a task plays the song, another
                       sends "gb:<strength><energy><bar>" on every beat, then "groove:end"

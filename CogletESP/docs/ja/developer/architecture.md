@@ -55,6 +55,7 @@ LLMはどの言語でも理解でき、xiaozhi.meの制限で13文字以内に�
 | `action:shake_head` / `blink` / `left_ear` / `right_ear` / `ears` | MCPツールからの1回きりの動き（3回） |
 | `dance:<style>` | 内蔵ダンスを開始。例：`dance:mecha` |
 | `dance:stop` | ダンスをすぐに止める |
+| `prep:<style>` / `prep:groove-<preset>` | ダンスのために会話を閉じるところ：眠らずにサーボの電源を入れたまま、ダンスの開始姿勢へ移る（ダンス開始、`dance:stop`、または15秒で終了） |
 | `groove:<energetic\|calm>:<bpm>` | 自分の曲でダンスを開始 |
 | `gb:<s><e><b>` | 自分の曲の1拍：アクセント0〜9、セクションのエネルギー0〜9、小節の頭0/1 |
 | `groove:end` | 自分の曲が終わった |

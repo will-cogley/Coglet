@@ -98,7 +98,8 @@ calibration_home = {}
 def _all_active_servos_settled():
     """Return True only when every enabled servo has reached its target."""
     for servo in servos.values():
-        if not servo.enabled:
+        # Released servos are unpowered and don't move: nothing to settle.
+        if not servo.enabled or servo.released:
             continue
 
         if abs(servo.target - servo.pos) > servo.pos_tolerance:
@@ -568,6 +569,15 @@ while True:
                     continue
 
                 # Custom song from the Music folder: beats are streamed live.
+                if rcvstate.startswith("prep:"):
+                    # The conversation is closing for a dance: keep the
+                    # servos powered and go to the dance's start pose.
+                    if mode.value() != 0:
+                        _enable_servo_outputs("dance prep")
+                        animation._finish_mcp_action(now, "dance prep")
+                        music.prepare(rcvstate[5:].strip().lower(), now)
+                    continue
+
                 if rcvstate.startswith("gb:"):
                     music.groove_beat(rcvstate[3:].strip(), now)
                     continue
@@ -649,7 +659,7 @@ while True:
         dance_owns_servos = False
 
         # Calibration Mode always wins over a dance.
-        if calibration_owns_servos and music.active():
+        if calibration_owns_servos and (music.active() or music.prepared()):
             music.stop(now, "Calibration Mode")
 
         if calibration_owns_servos:

@@ -4,6 +4,11 @@
 #               "dance:lyrical" | "dance:classic" | "dance:grand"  (Christmas edition)
 #               "dance:stop"                                    stop now (any mode)
 #
+# Before the music starts (sent when the conversation closes):
+#               "prep:<style>" | "prep:groove-<energetic|calm>"
+#               keep the servos powered and move to the dance's start pose
+#               instead of going to sleep; "dance:stop" cancels it.
+#
 # Custom songs from the Music folder (groove mode, beats streamed live):
 #               "groove:<energetic|calm>:<bpm>"   start
 #               "gb:<strength><energy><bar>"      one beat, e.g. "gb:751"
@@ -258,8 +263,47 @@ _dance = {
 }
 
 
+# Start pose held between "prep:" and the dance itself (servos stay powered).
+PREP_TIMEOUT_MS = 15000
+_prep = {"until": None}
+
+
 def active():
     return _dance["name"] is not None
+
+
+def prepared():
+    return _prep["until"] is not None
+
+
+def prepare(name, now):
+    """Hold the start pose of the coming dance until it starts.
+
+    Only changes what happens before the music: the dance itself (speeds,
+    angles, timing) is untouched. Moves use the servos' normal motion limits.
+    """
+    if active():
+        return False
+    if name.startswith("groove-"):
+        style = GROOVES.get(name[7:])
+    else:
+        style = STYLES.get(name)
+    if style is None:
+        print("[DANCE] PREPARE: unknown style", name)
+        return False
+    _prep["until"] = time.ticks_add(now, PREP_TIMEOUT_MS)
+    animation.reset_servo_motion_defaults()
+    for servo_name, angle in style["base"].items():
+        _set(servo_name, angle)
+    print("[DANCE] PREPARE {}: holding the start pose".format(name))
+    return True
+
+
+def _clear_prep(reason):
+    if _prep["until"] is None:
+        return
+    _prep["until"] = None
+    print("[DANCE] PREPARE ended ({})".format(reason))
 
 
 def keeps_released(name):
@@ -307,6 +351,7 @@ def start(name, now):
     if track is None or style is None:
         print("[DANCE] unknown track:", name)
         return False
+    _clear_prep("dance started")
     if active():
         stop(now, "restart")
     _dance["name"] = name
@@ -328,6 +373,9 @@ def start(name, now):
 
 
 def stop(now, reason="stop"):
+    if prepared():
+        _clear_prep(reason)
+        animation.new_state_flag = True    # re-apply the current state's pose
     if not active():
         return
     print("[DANCE] STOP {} ({})".format(_dance["name"], reason))
@@ -484,6 +532,7 @@ def start_groove(preset, bpm, now):
         print("[DANCE] unknown groove preset:", preset)
         style = GROOVES["calm"]
         preset = "calm"
+    _clear_prep("groove started")
     if active():
         stop(now, "restart")
     _dance["name"] = "groove-" + preset
@@ -651,6 +700,11 @@ def _update_groove(now):
 def update(now):
     """Run the dance. Returns True while the dance owns the servos."""
     if not active():
+        if prepared():
+            if time.ticks_diff(now, _prep["until"]) < 0:
+                return True                 # hold the start pose, no sleep
+            _clear_prep("timeout")
+            animation.new_state_flag = True
         return False
     if _dance["mode"] == "groove":
         return _update_groove(now)

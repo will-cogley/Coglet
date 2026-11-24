@@ -1084,12 +1084,15 @@ void Application::BeginSongPlayback() {
 
 void Application::StopDance(const char* reason) {
     const bool was_playing = dance_stage_ == DanceStage::Playing;
+    const bool was_prepared = dance_stage_ == DanceStage::Starting;   // "prep:" was sent
     ESP_LOGW(DANCE_TAG, "STOP (%s)", reason);
     dance_stage_ = DanceStage::None;
     if (was_playing) {
         dance_cancel_ = true;
         audio_service_.ResetDecoder();
         uart_send_string("dance:stop");
+    } else if (was_prepared) {
+        uart_send_string("dance:stop");   // cancel the RP2040's start pose
     }
 }
 
@@ -1110,6 +1113,18 @@ void Application::UpdateDance() {
         const bool quiet = audio_service_.IsIdle() && device_state_ != kDeviceStateSpeaking;
         if ((quiet && (replied || in_stage > 10LL * 1000000)) || in_stage > 20LL * 1000000) {
             ESP_LOGW(DANCE_TAG, "CLOSE session before dancing");
+            // Tell the RP2040 first: it keeps the servos powered and moves to
+            // the dance's start pose instead of going to sleep (and releasing
+            // torque) during the second or two before the music starts.
+            {
+                std::string prep = "prep:" + dance_style_;
+#if CONFIG_COGLET_MUSIC
+                if (dance_song_ != nullptr) {
+                    prep = std::string("prep:groove-") + dance_song_->PresetName();
+                }
+#endif
+                uart_send_string(prep.c_str());
+            }
             auto_awake_boot_pending_ = false;
             if (channel_open) {
                 protocol_->CloseAudioChannel();     // OnAudioChannelClosed -> idle

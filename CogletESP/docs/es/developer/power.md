@@ -35,6 +35,12 @@ YAW → PIT → ROL → LID → MOU → EAL → EAR → EYL → EYR
 La secuencia no bloquea el bucle principal. Si se libera el par antes de que
 termine, se cancela. Una canción propia tranquila deja apagados LID, EYL y EYR.
 
+Mientras un servo está apagado, su posición en el programa queda congelada.
+Al encenderse de nuevo, parte de donde se detuvo físicamente y va a su nuevo
+destino a su velocidad normal, en lugar de saltar hasta allí. Antes de un
+baile los servos ni siquiera se apagan (`prep:`, consulta
+[Arquitectura](architecture.md#protocolo-uart-esp--rp2040)).
+
 Registro: `[POWER] staggered power-up (...)`, `[POWER] all servos on after ... ms`.
 
 ## Espera

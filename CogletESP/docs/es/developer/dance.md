@@ -102,7 +102,8 @@ ESP (`main/application.cc`):
 ```
 self.coglet.dance(style)
   WaitAck   espera la respuesta de una línea (TTS terminado, audio en reposo; máx. 10–20 s)
-  Starting  cierra el canal de audio → idle
+  Starting  "prep:<style>" (el RP2040 deja los servos encendidos y va a la pose inicial),
+            cierra el canal de audio → idle
   Playing   incluida: "dance:<style>", una tarea reproduce la pista
             propia:   "groove:<preset>:<bpm>", una tarea reproduce la canción, otra
                       envía "gb:<strength><energy><bar>" en cada pulso y luego "groove:end"
