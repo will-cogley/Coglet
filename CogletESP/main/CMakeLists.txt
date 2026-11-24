@@ -400,6 +400,29 @@ if ("${size}" AND "${offset}")
     build_default_assets_bin()
     esptool_py_flash_to_partition(flash "assets" "${GENERATED_ASSETS_LOCAL_FILE}")
     message(STATUS "Generated default assets flash configured: ${GENERATED_ASSETS_LOCAL_FILE} -> assets partition")
+
+    # ---- NMRobotics Coglet: `idf.py flash` resets the web flasher's Settings --
+    # Settings saved from the Coglet Updater (wake word, threshold, sounds, AEC)
+    # live in one 4 KB sector right before the song library (coglet_settings.h)
+    # and take priority over menuconfig. Flashing your own build means "use my
+    # menuconfig", so `idf.py flash` writes a blank sector there. Wi-Fi,
+    # pairing, reminders and the song library are not touched, and
+    # `idf.py app-flash` keeps the settings. The Coglet Updater and the release
+    # zips leave this part out (make_manifest.py), so updating keeps them.
+    if(CONFIG_COGLET_DANCE AND CONFIG_COGLET_MUSIC)
+        math(EXPR coglet_library_bytes "${CONFIG_COGLET_MUSIC_LIBRARY_KB} * 1024")
+    else()
+        set(coglet_library_bytes 0)
+    endif()
+    math(EXPR coglet_settings_offset "${offset} + ${size} - ${coglet_library_bytes} - 4096" OUTPUT_FORMAT HEXADECIMAL)
+    set(coglet_settings_reset "${CMAKE_BINARY_DIR}/coglet_settings_reset.bin")
+    if(NOT EXISTS "${coglet_settings_reset}")
+        idf_build_get_property(coglet_python PYTHON)
+        execute_process(COMMAND "${coglet_python}" -c
+            "import sys; open(sys.argv[1], 'wb').write(b'\\xff' * 4096)" "${coglet_settings_reset}")
+    endif()
+    esptool_py_flash_target_image(flash coglet_settings_reset "${coglet_settings_offset}" "${coglet_settings_reset}")
+    message(STATUS "Coglet: idf.py flash resets the web flasher settings at ${coglet_settings_offset}")
 else()
     message(STATUS "Assets partition not found, using v1 partition table")
 endif()

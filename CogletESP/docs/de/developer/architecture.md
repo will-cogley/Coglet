@@ -144,7 +144,7 @@ ausspricht.
 | Daten | Wo | Bei Updates erhalten |
 |---|---|---|
 | WLAN, Kopplung, Erinnerungen | NVS-Partition | ja |
-| Einstellungen (Sektor `CGST`) | 4 KB vor der Songbibliothek, in `assets` | ja |
+| Einstellungen (Sektor `CGST`) | 4 KB vor der Songbibliothek, in `assets` | ja (von `idf.py flash` zurückgesetzt) |
 | Songbibliothek (`CGML`) | letzte 2 MB von `assets` (0xE00000–0x1000000) | ja |
 | App, Assets-Image | `ota_0` / `ota_1`, `assets` | ersetzt |
 

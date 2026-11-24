@@ -66,8 +66,11 @@ One 4 KB sector right before the song library (`main/coglet_settings.h`):
 
 Only values that differ from the selected edition's defaults are saved; the
 rest follows the firmware (`make_manifest.py` publishes the defaults in
-`manifest.json`). Missing or invalid values fall back to menuconfig, also after
-`idf.py flash`. The MultiNet model turns the wake word into phonemes itself; if
+`manifest.json`). Missing or invalid values fall back to menuconfig.
+`idf.py flash` writes a blank sector here (`coglet_settings_reset.bin`, added
+by `main/CMakeLists.txt`) so an own build starts from its menuconfig;
+`make_manifest.py` leaves that part out, so the page and the release zips keep
+the user's settings. The MultiNet model turns the wake word into phonemes itself; if
 it can't, Coglet keeps its built-in wake word and logs
 `Wake word "..." from settings can't be used`.
 

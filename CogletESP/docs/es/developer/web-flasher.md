@@ -70,7 +70,11 @@ líneas `key=value`:
 Solo se guardan los valores que difieren de los predeterminados de la edición
 elegida; el resto sigue al firmware (`make_manifest.py` publica los valores
 predeterminados en `manifest.json`). Los valores que faltan o no son válidos
-vuelven a los de menuconfig, también después de `idf.py flash`. El modelo
+vuelven a los de menuconfig. `idf.py flash` escribe aquí un sector en blanco
+(`coglet_settings_reset.bin`, añadido por `main/CMakeLists.txt`) para que un
+firmware propio empiece con su menuconfig; `make_manifest.py` omite esa parte,
+así que la página y los zip de las versiones conservan los ajustes del usuario.
+El modelo
 MultiNet convierte por sí mismo la palabra de activación en fonemas; si no
 puede, Coglet conserva su palabra de activación incorporada y registra
 `Wake word "..." from settings can't be used`.

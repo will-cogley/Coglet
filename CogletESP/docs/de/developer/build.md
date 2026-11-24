@@ -46,9 +46,11 @@ idf.py -p <port> flash monitor
   Modusschalter auf **ESP**.
 - `<port>` ist zum Beispiel `COM5` unter Windows, `/dev/ttyACM0` oder
   `/dev/ttyUSB0` unter Linux, `/dev/cu.usbmodem…` unter macOS.
-- `idf.py flash` behält WLAN, Kopplung, Erinnerungen, die im Coglet Updater
-  gespeicherten Einstellungen und die dort hinzugefügten Songs.
-  `idf.py erase-flash` löscht all das.
+- `idf.py flash` behält WLAN, Kopplung, Erinnerungen und die im Coglet Updater
+  hinzugefügten Songs, setzt aber die dort gespeicherten Einstellungen zurück
+  (Aktivierungswort, Aufweckschwelle, Töne, Coglet ins Wort fallen), damit Ihre
+  menuconfig gilt. `idf.py app-flash` behält diese Einstellungen.
+  `idf.py erase-flash` löscht alles.
 - Der erste Build lädt die verwalteten Komponenten herunter; spätere Builds
   sind inkrementell.
 
@@ -89,8 +91,9 @@ Dance → Firmware edition*.
 | NMRobotics Coglet Sounds | Standard-Start- und -Erinnerungstöne |
 
 Im Coglet Updater gespeicherte Werte (Aktivierungswort, Aufweckschwelle, Töne,
-AEC) haben Vorrang vor menuconfig, bis sie dort mit **Standardwerte verwenden**
-gelöscht werden.
+AEC) haben Vorrang vor menuconfig. `idf.py flash` löscht sie, sodass nach dem
+Flashen Ihres eigenen Builds dessen menuconfig gilt, bis auf der Seite wieder
+Einstellungen gespeichert werden. Ein Update im Coglet Updater behält sie.
 
 ## Firmware-Version
 

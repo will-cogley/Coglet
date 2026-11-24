@@ -144,7 +144,7 @@ llama a `self.coglet.reminder.last_due` y lo dice en una frase.
 | Datos | Dónde | Se conservan al actualizar |
 |---|---|---|
 | Wi-Fi, vinculación, recordatorios | partición NVS | sí |
-| Ajustes (sector `CGST`) | 4 KB antes de la biblioteca de canciones, en `assets` | sí |
+| Ajustes (sector `CGST`) | 4 KB antes de la biblioteca de canciones, en `assets` | sí (`idf.py flash` los restablece) |
 | Biblioteca de canciones (`CGML`) | últimos 2 MB de `assets` (0xE00000–0x1000000) | sí |
 | Aplicación, imagen de assets | `ota_0` / `ota_1`, `assets` | se reemplazan |
 

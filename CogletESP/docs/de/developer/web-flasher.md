@@ -70,7 +70,11 @@ Ein 4-KB-Sektor direkt vor der Songbibliothek (`main/coglet_settings.h`):
 Gespeichert werden nur Werte, die von den Standardwerten der gewählten Edition
 abweichen; der Rest folgt der Firmware (`make_manifest.py` veröffentlicht die
 Standardwerte in `manifest.json`). Fehlende oder ungültige Werte fallen auf
-menuconfig zurück, auch nach `idf.py flash`. Das MultiNet-Modell wandelt das
+menuconfig zurück. `idf.py flash` schreibt hier einen leeren Sektor
+(`coglet_settings_reset.bin`, von `main/CMakeLists.txt` hinzugefügt), damit ein
+eigener Build mit seiner menuconfig startet; `make_manifest.py` lässt diesen
+Teil weg, sodass die Seite und die Release-Zips die Einstellungen der Nutzer
+behalten. Das MultiNet-Modell wandelt das
 Aktivierungswort selbst in Phoneme um; gelingt das nicht, behält Coglet sein
 eingebautes Aktivierungswort und protokolliert
 `Wake word "..." from settings can't be used`.

@@ -62,7 +62,10 @@ RP2040にMicroPythonが入っている必要があります（キットはすべ
 
 保存するのは、選んだエディションの初期値と違う値だけです。それ以外はファームウェアに
 従います（`make_manifest.py` が初期値を `manifest.json` に公開します）。値がない、または
-不正な場合は、`idf.py flash` のあとでもmenuconfigの値に戻ります。MultiNetモデルは
+不正な場合は、menuconfigの値に戻ります。`idf.py flash` はここに空のセクター
+（`main/CMakeLists.txt` が追加する `coglet_settings_reset.bin`）を書き込むので、自分の
+ビルドはそのmenuconfigから始まります。`make_manifest.py` はこのパーツを除外するので、
+ページとリリースのzipではユーザーの設定が残ります。MultiNetモデルは
 ウェイクワードを自分で音素に変換します。変換できない場合、Cogletは内蔵のウェイクワードの
 ままにして、`Wake word "..." from settings can't be used` と記録します。
 

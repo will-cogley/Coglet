@@ -137,7 +137,7 @@ LLM calls `self.coglet.reminder.last_due` and says it in one sentence.
 | Data | Where | Kept by updates |
 |---|---|---|
 | Wi-Fi, pairing, reminders | NVS partition | yes |
-| Settings (`CGST` sector) | 4 KB before the song library, in `assets` | yes |
+| Settings (`CGST` sector) | 4 KB before the song library, in `assets` | yes (reset by `idf.py flash`) |
 | Song library (`CGML`) | last 2 MB of `assets` (0xE00000–0x1000000) | yes |
 | App, assets image | `ota_0` / `ota_1`, `assets` | replaced |
 

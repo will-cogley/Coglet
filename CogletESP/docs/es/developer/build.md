@@ -45,8 +45,10 @@ idf.py -p <puerto> flash monitor
   modo en **ESP**.
 - `<puerto>` es por ejemplo `COM5` en Windows, `/dev/ttyACM0` o `/dev/ttyUSB0`
   en Linux, `/dev/cu.usbmodem…` en macOS.
-- `idf.py flash` conserva el Wi-Fi, la vinculación, los recordatorios, los
-  ajustes guardados desde el Coglet Updater y las canciones añadidas allí.
+- `idf.py flash` conserva el Wi-Fi, la vinculación, los recordatorios y las
+  canciones añadidas en el Coglet Updater, pero restablece los ajustes guardados
+  allí (palabra de activación, umbral, sonidos, Interrumpir a Coglet), para que
+  se aplique tu menuconfig. `idf.py app-flash` conserva esos ajustes.
   `idf.py erase-flash` lo borra todo.
 - La primera compilación descarga los componentes gestionados; las siguientes
   son incrementales.
@@ -87,8 +89,10 @@ misma forma. O elígela en menuconfig: *NMRobotics Coglet Dance → Firmware edi
 | NMRobotics Coglet Sounds | Sonidos de inicio y de recordatorio predeterminados |
 
 Los valores guardados desde el Coglet Updater (palabra de activación, umbral,
-sonidos, AEC) tienen prioridad sobre menuconfig hasta que se borran allí con
-**Usar valores predeterminados**.
+sonidos, AEC) tienen prioridad sobre menuconfig. `idf.py flash` los borra, así
+que después de grabar tu propio firmware se aplica su menuconfig hasta que se
+vuelvan a guardar ajustes en la página. Actualizar con el Coglet Updater los
+conserva.
 
 ## Versión del firmware
 

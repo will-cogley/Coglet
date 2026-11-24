@@ -44,8 +44,10 @@ idf.py -p <ポート> flash monitor
 - 上側のUSB-Cポート（書き込み用ポート）につなぎ、モード切替スイッチは **ESP** にします。
 - `<ポート>` は、たとえばWindowsでは `COM5`、Linuxでは `/dev/ttyACM0` や
   `/dev/ttyUSB0`、macOSでは `/dev/cu.usbmodem…` です。
-- `idf.py flash` では、Wi-Fi、ペアリング、リマインダー、Coglet Updaterで保存した
-  設定と追加した曲は残ります。`idf.py erase-flash` ではすべて消えます。
+- `idf.py flash` では、Wi-Fi、ペアリング、リマインダー、Coglet Updaterで追加した曲は
+  残りますが、そこで保存した設定（ウェイクワード、起動しきい値、効果音、話の途中で
+  割り込む）はリセットされ、自分のmenuconfigが使われます。`idf.py app-flash` では
+  これらの設定も残ります。`idf.py erase-flash` ではすべて消えます。
 - 初回のビルドではマネージドコンポーネントをダウンロードします。2回目以降は差分ビルドです。
 
 ボードタイプ：**NMRobotics Coglet (CogNog V3.0 PCB)**
@@ -83,8 +85,10 @@ idf.py -B build-christmas -p <ポート> flash
 | NMRobotics Coglet Dance | 内蔵ダンス、ファームウェアのエディション、`Music/` の曲、曲ライブラリーのサイズ、ビートのタイミング補正 |
 | NMRobotics Coglet Sounds | 初期の起動音とリマインダー音 |
 
-Coglet Updaterで保存した値（ウェイクワード、起動しきい値、効果音、AEC）は、そこで
-**初期値に戻す** で消すまで、menuconfigより優先されます。
+Coglet Updaterで保存した値（ウェイクワード、起動しきい値、効果音、AEC）は、
+menuconfigより優先されます。`idf.py flash` はこれらを消すので、自分のビルドを
+書き込んだあとは、ページでまた設定を保存するまで、そのビルドのmenuconfigが使われます。
+Coglet Updaterでのアップデートでは残ります。
 
 ## ファームウェアのバージョン
 

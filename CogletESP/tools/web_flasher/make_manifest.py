@@ -6,7 +6,8 @@ part into <site>/firmware/ and writes <site>/firmware/manifest.json, which the
 web page (index.html) uses to flash each part at its own offset.
 
 Only the parts the build flashes are written (bootloader, partition table,
-OTA data, app, assets). The NVS partition, where Wi-Fi credentials, the
+OTA data, app, assets), except the blank settings sector that `idf.py flash`
+writes to reset the page's Settings: an update keeps the user's settings. The NVS partition, where Wi-Fi credentials, the
 xiaozhi.me pairing and reminders live, is never part of the image, so an
 update keeps them. Neither is the song library at the end of the assets
 partition (songs added on the web page): the manifest tells the page where it
@@ -49,6 +50,8 @@ def read_partitions(build):
 
 
 SETTINGS_SIZE = 4096
+# Blank settings sector that main/CMakeLists.txt adds to `idf.py flash`.
+SETTINGS_RESET_PART = "coglet_settings_reset.bin"
 
 
 def settings_defaults(build):
@@ -159,6 +162,11 @@ def main(argv=None):
     parts = []
     for offset_text, rel in sorted(flasher["flash_files"].items(), key=lambda kv: int(kv[0], 16)):
         offset = int(offset_text, 16)
+        if os.path.basename(rel) == SETTINGS_RESET_PART:
+            # Only for `idf.py flash` (own builds use their menuconfig): an
+            # update from the page or a release zip keeps the user's settings.
+            print("  0x{:07x}  skipped    {} (idf.py flash only)".format(offset, rel))
+            continue
         src = os.path.join(args.build, rel)
         with open(src, "rb") as f:
             data = f.read()

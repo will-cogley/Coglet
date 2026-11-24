@@ -16,12 +16,13 @@ The `assets` partition holds, from its start:
 1. the **assets image** built with the firmware (wake word models, fonts,
    sounds; `build/generated_assets.bin`), written by every update;
 2. the **settings** sector (4 KB, `CGST`) right before the song library,
-   written only by the Coglet Updater's Settings;
+   written by the Coglet Updater's Settings and reset (blank) by `idf.py flash`;
 3. the **song library** (`CGML`), the last 2 MB (0xE00000–0x1000000),
    written only by the Coglet Updater's *My songs*.
 
-Updates (Coglet Updater or `idf.py flash`) never write NVS, the settings or the
-song library. `tools/web_flasher/make_manifest.py` refuses to publish a build
+Updates never write NVS or the song library. The Coglet Updater and the release
+zips keep the settings too; `idf.py flash` resets them so an own build uses its
+menuconfig (`idf.py app-flash` keeps them). `tools/web_flasher/make_manifest.py` refuses to publish a build
 whose assets image would reach the settings sector.
 
 Changing this table moves data that users already have on their Coglets: keep

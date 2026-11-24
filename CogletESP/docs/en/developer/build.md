@@ -43,8 +43,10 @@ idf.py -p <port> flash monitor
 - Plug into the top (programming) USB-C port, with the mode switch on **ESP**.
 - `<port>` is for example `COM5` on Windows, `/dev/ttyACM0` or `/dev/ttyUSB0`
   on Linux, `/dev/cu.usbmodem…` on macOS.
-- `idf.py flash` keeps Wi-Fi, pairing, reminders, the settings saved from the
-  Coglet Updater and the songs added there. `idf.py erase-flash` clears all of it.
+- `idf.py flash` keeps Wi-Fi, pairing, reminders and the songs added on the
+  Coglet Updater, but resets the settings saved there (wake word, sensitivity,
+  sounds, Talk over Coglet), so your menuconfig applies. `idf.py app-flash`
+  keeps those settings. `idf.py erase-flash` clears everything.
 - The first build downloads the managed components; later builds are
   incremental.
 
@@ -84,7 +86,9 @@ same way. Or pick it in menuconfig: *NMRobotics Coglet Dance → Firmware editio
 | NMRobotics Coglet Sounds | Default startup and reminder sounds |
 
 Values saved from the Coglet Updater (wake word, sensitivity, sounds, AEC)
-take priority over menuconfig until they are cleared there with **Use defaults**.
+take priority over menuconfig. `idf.py flash` clears them, so after flashing
+your own build its menuconfig applies until settings are saved on the page again.
+Updating from the Coglet Updater keeps them.
 
 ## Firmware version
 
